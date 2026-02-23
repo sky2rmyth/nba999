@@ -354,8 +354,8 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
         # --- Output for every game (no filtering) ---
-        spread_range = f"{sim.get('spread_5pct', 0):.1f} → {sim.get('spread_95pct', 0):.1f}"
-        total_range = f"{sim.get('total_5pct', 0):.1f} → {sim.get('total_95pct', 0):.1f}"
+        spread_range = f"{sim['spread_5pct']:.1f} → {sim['spread_95pct']:.1f}"
+        total_range = f"{sim['total_5pct']:.1f} → {sim['total_95pct']:.1f}"
 
         lines.extend([
             f"🏀 {zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",

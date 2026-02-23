@@ -68,27 +68,51 @@ def run_prediction(target_date: str | None = None) -> None:
 
     lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
+    odds_valid_count = 0
 
     for g in games:
         game_id = g["id"]
         home = g["home_team"]
         vis = g["visitor_team"]
 
+        # --- Debug odds API ---
         try:
             odds_data = client.betting_odds(game_ids=game_id, per_page=100)
+            logger.info("Odds API debug | game_id=%s | provider_count=%d | response_length=%d",
+                        game_id, len(odds_data), len(str(odds_data)))
             opening_payload = {"data": odds_data}
             live_payload = {"data": odds_data}
         except Exception:
-            logger.warning("betting_odds unavailable for game %s – continuing without odds", game_id, exc_info=True)
+            logger.warning("betting_odds unavailable for game %s – odds marked missing", game_id, exc_info=True)
             opening_payload = {"data": []}
             live_payload = {"data": []}
+
         store_opening_and_live(game_id, opening_payload, live_payload)
         opening_spread, opening_total, _ = parse_main_market(opening_payload)
         live_spread, live_total, _ = parse_main_market(live_payload)
-        opening_spread = opening_spread if opening_spread is not None else 0.0
+
+        # --- Validate odds existence (no fallback values) ---
+        if opening_spread is None or opening_total is None:
+            logger.warning("Odds missing for game %s – skipping prediction", game_id)
+            lines.extend(
+                [
+                    f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
+                    "盘口：暂无数据",
+                    "",
+                    "━━━━━━━━━━━━━━━━",
+                ]
+            )
+            continue
+
+        odds_valid_count += 1
         live_spread = live_spread if live_spread is not None else opening_spread
-        opening_total = opening_total if opening_total is not None else 220.0
         live_total = live_total if live_total is not None else opening_total
+
+        logger.info("Loaded odds for game %s", game_id)
+        logger.info("  Opening Spread: %s", opening_spread)
+        logger.info("  Live Spread: %s", live_spread)
+        logger.info("  Opening Total: %s", opening_total)
+        logger.info("  Live Total: %s", live_total)
 
         hrm = _recent_margin(home["id"])
         vrm = _recent_margin(vis["id"])
@@ -170,17 +194,21 @@ def run_prediction(target_date: str | None = None) -> None:
         )
         saved_count += 1
 
-    # --- Step 7: Verify predictions were saved ---
+    # --- Step 7: Fail if no games have valid odds ---
+    if games and odds_valid_count == 0:
+        raise RuntimeError("No betting odds returned from balldontlie API")
+
+    # --- Step 8: Verify predictions were saved ---
     if games and saved_count == 0:
         logger.error("No predictions saved — aborting workflow")
         sys.exit(1)
 
-    # --- Step 8: Database validation summary ---
+    # --- Step 9: Database validation summary ---
     logger.info("Saved predictions: %d games", saved_count)
     logger.info("Models present: YES")
     logger.info("Training executed: %s", "YES" if training_executed else "NO")
 
-    # --- Step 9: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
+    # --- Step 10: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
     send_message("\n".join(lines))
     logger.info("Telegram message sent successfully")
 

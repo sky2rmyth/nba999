@@ -65,8 +65,10 @@ def build_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
         vrm = _recent_margin(conn, int(r["visitor_team_id"]), str(r["date"]))
         margin = (r.get("home_score") or 0) - (r.get("visitor_score") or 0)
         total = (r.get("home_score") or 0) + (r.get("visitor_score") or 0)
-        o_spread = r.get("opening_spread") if pd.notna(r.get("opening_spread")) else 0.0
-        o_total = r.get("opening_total") if pd.notna(r.get("opening_total")) else 220.0
+        o_spread = r.get("opening_spread")
+        o_total = r.get("opening_total")
+        if not pd.notna(o_spread) or not pd.notna(o_total):
+            continue
         rows.append(
             {
                 "game_id": r["game_id"],

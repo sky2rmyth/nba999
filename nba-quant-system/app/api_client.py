@@ -95,3 +95,47 @@ class BallDontLieClient:
 
     def betting_odds(self, **params: Any) -> list[dict[str, Any]]:
         return self.fetch_all_pages("betting_odds", params)
+
+
+# ---------------------------------------------------------------------------
+# Module-level convenience functions (centralized API access)
+# ---------------------------------------------------------------------------
+
+def _default_client() -> BallDontLieClient:
+    return BallDontLieClient()
+
+
+def get_games(date: str) -> list[dict[str, Any]]:
+    return _default_client().games(**{"dates[]": [date], "per_page": 100})
+
+
+def get_teams() -> list[dict[str, Any]]:
+    return _default_client().teams(per_page=100)
+
+
+def get_players() -> list[dict[str, Any]]:
+    return _default_client().players(per_page=100)
+
+
+def get_game_player_stats(game_id: int) -> list[dict[str, Any]]:
+    return _default_client().game_player_stats(**{"game_ids[]": [game_id], "per_page": 100})
+
+
+def get_season_averages(season: int) -> list[dict[str, Any]]:
+    return _default_client().season_averages(season=season)
+
+
+def get_team_season_averages(season: int) -> list[dict[str, Any]]:
+    return _default_client().team_season_averages(season=season)
+
+
+def get_box_scores(game_id: int) -> list[dict[str, Any]]:
+    return _default_client().box_scores(**{"game_ids[]": [game_id], "per_page": 100})
+
+
+def get_injuries() -> list[dict[str, Any]]:
+    return _default_client().injuries(per_page=100)
+
+
+def get_betting_odds(game_id: int) -> list[dict[str, Any]]:
+    return _default_client().betting_odds(game_ids=game_id, per_page=100)

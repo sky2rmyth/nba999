@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import datetime
 
 import pandas as pd
@@ -12,12 +13,15 @@ from .data_pipeline import bootstrap_historical_data, sync_date_games
 from .feature_engineering import FEATURE_COLUMNS
 from .game_simulator import run_possession_simulation
 from .odds_tracker import parse_main_market, store_opening_and_live
+from .prediction_models import MODEL_DIR
 from .rating_engine import compute_ratings
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
 from .telegram_bot import send_message
 
 logger = logging.getLogger(__name__)
+
+MIN_SIMULATION_COUNT = 10000
 
 
 def _recent_margin(team_id: int) -> float:
@@ -36,14 +40,34 @@ def _recent_margin(team_id: int) -> float:
     return sum(vals) / len(vals)
 
 
+def _verify_models_present() -> bool:
+    sp = MODEL_DIR / "spread_model.pkl"
+    tp = MODEL_DIR / "total_model.pkl"
+    return sp.exists() and tp.exists()
+
+
 def run_prediction(target_date: str | None = None) -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     target_date = target_date or datetime.utcnow().strftime("%Y-%m-%d")
+
+    # --- Step 1: Bootstrap historical data ---
     bootstrap_historical_data()
+
+    # --- Step 2: Ensure models (auto-train on first run) ---
+    models_existed_before = _verify_models_present()
     model_bundle = ensure_models()
+    if not _verify_models_present():
+        logger.error("Models missing after ensure_models — aborting")
+        sys.exit(1)
+    logger.info("Models present: YES")
+    training_executed = not models_existed_before
+
+    # --- Step 3: Fetch today's games ---
     client = BallDontLieClient()
     games = sync_date_games(target_date)
 
     lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
+    saved_count = 0
 
     for g in games:
         game_id = g["id"]
@@ -83,6 +107,7 @@ def run_prediction(target_date: str | None = None) -> None:
         spread_prob = float(model_bundle.spread_model.predict_proba(feat)[:, 1][0])
         total_prob = float(model_bundle.total_model.predict_proba(feat)[:, 1][0])
 
+        # --- Step 4: Monte Carlo simulation ---
         sim = run_possession_simulation(
             game_id=game_id,
             home_off_rating=112 + hrm,
@@ -90,8 +115,16 @@ def run_prediction(target_date: str | None = None) -> None:
             pace=98,
             spread_line=live_spread,
             total_line=live_total,
-            n_sim=10000,
+            n_sim=MIN_SIMULATION_COUNT,
         )
+
+        # --- Step 5: Verify simulation count ---
+        sim_count = sim.get("simulation_count", 0)
+        if sim_count < MIN_SIMULATION_COUNT:
+            logger.error("Simulation count %d < %d for game %s — aborting", sim_count, MIN_SIMULATION_COUNT, game_id)
+            sys.exit(1)
+        logger.info("Simulation verified: %d+ runs per game (game_id=%s)", sim_count, game_id)
+
         spread_edge = sim["spread_cover_probability"] - 0.5
         total_edge = sim["over_probability"] - 0.5
         market = analyze_line_behavior(opening_spread, live_spread, spread_edge, opening_total, live_total, total_edge)
@@ -110,10 +143,13 @@ def run_prediction(target_date: str | None = None) -> None:
             ]
         )
 
+        # --- Step 6: Save prediction to database ---
         insert_prediction(
             snapshot_date=target_date,
             row={
                 "game_id": game_id,
+                "home_team": home.get("full_name", ""),
+                "away_team": vis.get("full_name", ""),
                 "prediction_time": datetime.utcnow().isoformat(),
                 "spread_pick": spread_pick,
                 "spread_prob": spread_prob,
@@ -132,8 +168,21 @@ def run_prediction(target_date: str | None = None) -> None:
                 "details": {"simulation": sim, "market": market},
             },
         )
+        saved_count += 1
 
+    # --- Step 7: Verify predictions were saved ---
+    if games and saved_count == 0:
+        logger.error("No predictions saved — aborting workflow")
+        sys.exit(1)
+
+    # --- Step 8: Database validation summary ---
+    logger.info("Saved predictions: %d games", saved_count)
+    logger.info("Models present: YES")
+    logger.info("Training executed: %s", "YES" if training_executed else "NO")
+
+    # --- Step 9: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
     send_message("\n".join(lines))
+    logger.info("Telegram message sent successfully")
 
 
 if __name__ == "__main__":

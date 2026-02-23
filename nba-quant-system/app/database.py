@@ -62,6 +62,8 @@ def init_db() -> None:
                 live_spread REAL,
                 opening_total REAL,
                 live_total REAL,
+                simulation_runs INTEGER NOT NULL DEFAULT 10000,
+                odds_source TEXT NOT NULL DEFAULT 'NONE',
                 details_json TEXT NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(snapshot_date, game_id)
@@ -129,8 +131,9 @@ def insert_prediction(snapshot_date: str, row: dict[str, Any]) -> None:
             INSERT OR IGNORE INTO predictions_snapshot(
                 snapshot_date,game_id,home_team,away_team,prediction_time,spread_pick,spread_prob,total_pick,total_prob,
                 confidence_score,star_rating,recommendation_index,expected_home_score,expected_visitor_score,
-                simulation_variance,opening_spread,live_spread,opening_total,live_total,details_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                simulation_variance,opening_spread,live_spread,opening_total,live_total,
+                simulation_runs,odds_source,details_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 snapshot_date,
@@ -152,6 +155,8 @@ def insert_prediction(snapshot_date: str, row: dict[str, Any]) -> None:
                 row.get("live_spread"),
                 row.get("opening_total"),
                 row.get("live_total"),
+                row.get("simulation_runs", 10000),
+                row.get("odds_source", "NONE"),
                 json.dumps(row.get("details", {}), ensure_ascii=False),
             ),
         )

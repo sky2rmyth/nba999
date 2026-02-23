@@ -5,9 +5,12 @@ import logging
 from .data_pipeline import bootstrap_historical_data
 from .database import get_conn, init_db
 from .feature_engineering import FEATURE_COLUMNS, build_training_frame
-from .prediction_models import load_models, train_models
+from .prediction_models import load_models, train_models, _current_version
+from .rating_engine import is_spread_correct, is_total_correct
 
 logger = logging.getLogger(__name__)
+
+PERFORMANCE_THRESHOLD = 0.45  # retrain if accuracy drops below 45%
 
 
 def _try_send_telegram(text: str) -> None:
@@ -28,8 +31,49 @@ def _db_has_completed_games() -> bool:
     return count > 0
 
 
+def _check_performance_degradation() -> bool:
+    """Check if recent prediction accuracy dropped below threshold."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.spread_pick, p.total_pick, p.live_spread, p.live_total,
+                       r.final_home_score, r.final_visitor_score
+                FROM predictions_snapshot p
+                JOIN results r ON p.game_id = r.game_id
+                ORDER BY p.created_at DESC LIMIT 30
+                """
+            ).fetchall()
+        if len(rows) < 10:
+            return False
+        hits = 0
+        total = 0
+        for r in rows:
+            margin = r["final_home_score"] - r["final_visitor_score"]
+            total_pts = r["final_home_score"] + r["final_visitor_score"]
+            if r["live_spread"] is not None:
+                hits += int(is_spread_correct(r["spread_pick"], margin, r["live_spread"]))
+                total += 1
+            if r["live_total"] is not None:
+                hits += int(is_total_correct(r["total_pick"], total_pts, r["live_total"]))
+                total += 1
+        if total == 0:
+            return False
+        accuracy = hits / total
+        logger.info("Recent accuracy: %.1f%% (%d/%d)", accuracy * 100, hits, total)
+        if accuracy < PERFORMANCE_THRESHOLD:
+            logger.info("Performance degradation detected (%.1f%% < %.1f%%) — triggering retrain",
+                        accuracy * 100, PERFORMANCE_THRESHOLD * 100)
+            return True
+    except Exception:
+        logger.debug("Performance check failed", exc_info=True)
+    return False
+
+
 def should_retrain(force: bool = False) -> bool:
     if force:
+        return True
+    if _check_performance_degradation():
         return True
     with get_conn() as conn:
         pending = conn.execute(
@@ -61,22 +105,27 @@ def ensure_models(force: bool = False):
 
         # Send training report to Telegram
         duration = getattr(bundle, "duration", 0)
+        sc_acc = bundle.metrics.get("spread_cover_accuracy", 0)
+        to_acc = bundle.metrics.get("total_over_accuracy", 0)
         report = (
             "📊 模型训练报告\n\n"
-            "训练方式: Regression Score Model\n"
+            f"版本: {bundle.version}\n"
+            "训练方式: Hybrid Architecture\n"
             f"模型: LightGBM\n"
             f"训练样本: {sample_count}\n"
             f"特征数量: {feature_count}\n"
             f"训练耗时: {duration:.1f} 秒\n"
             "主队得分模型: 完成\n"
-            "客队得分模型: 完成"
+            "客队得分模型: 完成\n"
+            f"让分覆盖模型: 完成 ({sc_acc:.1%})\n"
+            f"大小分模型: 完成 ({to_acc:.1%})"
         )
         _try_send_telegram(report)
 
-        logger.info("Training executed: YES | Algorithm: %s", bundle.algorithm)
+        logger.info("Training executed: YES | Algorithm: %s | Version: %s", bundle.algorithm, bundle.version)
         return bundle
     bundle = load_models()
     if bundle is None:
         raise RuntimeError("Model files missing")
-    logger.info("Training executed: NO | Models loaded from disk")
+    logger.info("Training executed: NO | Models loaded from disk | Version: %s", bundle.version)
     return bundle

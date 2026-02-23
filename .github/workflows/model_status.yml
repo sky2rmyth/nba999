@@ -1,15 +1,13 @@
-name: review
+name: model_status
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 12 * * *'
 
 permissions:
   contents: read
 
 jobs:
-  review:
+  status:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,12 +17,11 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
         working-directory: nba-quant-system
-      - name: Run review
+      - name: Run model status
         env:
-          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        run: python -m app.review_engine
+        run: python -m app.model_status
         working-directory: nba-quant-system

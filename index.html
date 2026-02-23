@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Quant System</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #1a1a2e);
+            color: var(--tg-theme-text-color, #e0e0e0);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header p { font-size: 14px; opacity: 0.7; }
+        .btn-group {
+            width: 100%;
+            max-width: 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 16px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            color: #fff;
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-predict { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .btn-review  { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .btn-status  { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .status-bar {
+            margin-top: 24px;
+            width: 100%;
+            max-width: 400px;
+            padding: 16px;
+            border-radius: 12px;
+            background: var(--tg-theme-secondary-bg-color, #16213e);
+            font-size: 14px;
+            display: none;
+        }
+        .status-bar.visible { display: block; }
+        .status-bar .line { padding: 4px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏀 NBA Quant System</h1>
+        <p>智能量化预测控制台</p>
+    </div>
+    <div class="btn-group">
+        <button class="btn btn-predict" onclick="dispatch('predict')">📊 今日预测</button>
+        <button class="btn btn-review"  onclick="dispatch('review')">🔁 复盘学习</button>
+        <button class="btn btn-status"  onclick="dispatch('model_status')">📈 模型状态</button>
+    </div>
+    <div id="status" class="status-bar"></div>
+    <script>
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg) { tg.ready(); tg.expand(); }
+
+        const WORKFLOWS = {
+            predict: 'predict.yml',
+            review: 'review.yml',
+            model_status: 'model_status.yml'
+        };
+
+        function dispatch(action) {
+            const file = WORKFLOWS[action];
+            if (!file) return;
+            const el = document.getElementById('status');
+            el.className = 'status-bar visible';
+            el.innerHTML = '<div class="line">⏳ 正在触发工作流...</div>';
+
+            if (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) {
+                el.innerHTML = '<div class="line">✅ 指令已发送至后台</div>';
+            } else {
+                el.innerHTML = '<div class="line">✅ 请通过 Telegram 机器人触发操作</div>';
+            }
+        }
+    </script>
+</body>
+</html>

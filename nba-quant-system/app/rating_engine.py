@@ -15,6 +15,24 @@ def _edge_to_stars(edge_pct: float) -> int:
     return 1
 
 
+def is_spread_correct(spread_pick: str, margin: float, live_spread: float | None) -> bool:
+    """Determine if spread pick was correct given final margin and line."""
+    if live_spread is None:
+        return False
+    return ("受让" not in spread_pick and margin + live_spread > 0) or (
+        "受让" in spread_pick and margin + live_spread <= 0
+    )
+
+
+def is_total_correct(total_pick: str, total_points: float, live_total: float | None) -> bool:
+    """Determine if total pick was correct given final total and line."""
+    if live_total is None:
+        return False
+    return (total_pick == "大分" and total_points > live_total) or (
+        total_pick == "小分" and total_points <= live_total
+    )
+
+
 def compute_spread_rating(spread_cover_prob: float, market_spread: float) -> dict[str, float | int]:
     """Compute spread recommendation from simulation probability vs implied market."""
     implied_prob = 0.5  # market line implies ~50%

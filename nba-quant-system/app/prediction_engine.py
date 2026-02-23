@@ -19,11 +19,16 @@ from .prediction_models import MODEL_DIR
 from .rating_engine import compute_spread_rating, compute_total_rating
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
-from .telegram_bot import send_message
+from .telegram_bot import send_message, ProgressTracker
 
 logger = logging.getLogger(__name__)
 
 MIN_SIMULATION_COUNT = 10000
+
+# Hybrid model blending weights: Monte Carlo simulation vs classifier model.
+# MC simulation captures game-specific dynamics; classifier captures historical patterns.
+MC_WEIGHT = 0.6
+CLASSIFIER_WEIGHT = 0.4
 
 
 def _verify_models_present() -> bool:
@@ -72,16 +77,22 @@ def run_prediction(target_date: str | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     target_date = target_date or datetime.utcnow().strftime("%Y-%m-%d")
 
+    # --- Progress tracker ---
+    progress = ProgressTracker()
+    progress.start()  # 🟡 System Starting
+
     # --- Step 1: Bootstrap historical data ---
+    progress.advance(1)  # 🔵 Fetching Games Data
     bootstrap_historical_data()
 
     # --- Step 2: Ensure models (auto-train on first run) ---
+    progress.advance(2)  # 🧠 Loading Models
     models_existed_before = _verify_models_present()
     model_bundle = ensure_models()
     if not _verify_models_present():
         logger.error("Models missing after ensure_models — aborting")
         sys.exit(1)
-    logger.info("Models present: YES")
+    logger.info("Models present: YES | Version: %s", model_bundle.version)
     training_executed = not models_existed_before
 
     # --- Verification: feature count ---
@@ -98,11 +109,14 @@ def run_prediction(target_date: str | None = None) -> None:
     # --- Step 3b: Fetch primary odds (the-odds-api) ---
     primary_odds = fetch_today_odds()
 
+    # --- Monte Carlo phase ---
+    progress.advance(3)  # ⚙️ Running Monte Carlo Simulation
+
     lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
     odds_valid_count = 0
 
-    for g in games:
+    for idx, g in enumerate(games):
         game_id = g["id"]
         home = g["home_team"]
         vis = g["visitor_team"]
@@ -182,6 +196,22 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
 
+        # --- Hybrid: Spread Cover & Total model predictions ---
+        spread_cover_prob_model = None
+        total_over_prob_model = None
+        if model_bundle.spread_cover_model is not None:
+            try:
+                spread_cover_prob_model = float(model_bundle.spread_cover_model.predict_proba(feat)[0][1])
+                logger.info("Spread Cover Model Prob: %.2f%%", spread_cover_prob_model * 100)
+            except Exception:
+                pass
+        if model_bundle.total_model is not None:
+            try:
+                total_over_prob_model = float(model_bundle.total_model.predict_proba(feat)[0][1])
+                logger.info("Total Over Model Prob: %.2f%%", total_over_prob_model * 100)
+            except Exception:
+                pass
+
         # --- Compute variance from recent games ---
         home_feat_row = feat.iloc[0]
         home_var = max(float(home_feat_row.get("home_scoring_variance", 64.0)), 64.0)
@@ -199,6 +229,10 @@ def run_prediction(target_date: str | None = None) -> None:
             n_sim=MIN_SIMULATION_COUNT,
         )
 
+        progress.set_game_progress(
+            f"⚙️ Game {idx + 1}/{len(games)}: {zh_name(vis['full_name'])} vs {zh_name(home['full_name'])} ✅"
+        )
+
         # --- Step 5: Verify simulation count ---
         sim_count = sim.get("simulation_count", 0)
         if sim_count < MIN_SIMULATION_COUNT:
@@ -206,9 +240,13 @@ def run_prediction(target_date: str | None = None) -> None:
             sys.exit(1)
         logger.info("Simulation runs: %d (game_id=%s)", sim_count, game_id)
 
-        # --- Spread decision: based on predicted margin vs market spread ---
-        # If predicted_margin > market_spread (negative means home favored) → pick favorite
-        # spread_line is from home perspective (e.g. -4.5 means home favored by 4.5)
+        # --- Hybrid spread decision: combine Monte Carlo + classifier ---
+        mc_spread_prob = sim["spread_cover_probability"]
+        if spread_cover_prob_model is not None:
+            combined_spread_prob = MC_WEIGHT * mc_spread_prob + CLASSIFIER_WEIGHT * spread_cover_prob_model
+        else:
+            combined_spread_prob = mc_spread_prob
+
         if predicted_margin > -live_spread:
             spread_pick = f"主队 {zh_name(home['full_name'])} {live_spread:+.1f}"
             spread_pick_label = "home_cover"
@@ -216,18 +254,24 @@ def run_prediction(target_date: str | None = None) -> None:
             spread_pick = f"客队 {zh_name(vis['full_name'])} {-live_spread:+.1f}（受让）"
             spread_pick_label = "away_cover"
 
-        # --- Total decision: based on predicted total vs market total ---
+        # --- Hybrid total decision: combine Monte Carlo + classifier ---
+        mc_total_prob = sim["over_probability"]
+        if total_over_prob_model is not None:
+            combined_total_prob = MC_WEIGHT * mc_total_prob + CLASSIFIER_WEIGHT * total_over_prob_model
+        else:
+            combined_total_prob = mc_total_prob
+
         if predicted_total > live_total:
             total_pick = "大分"
         else:
             total_pick = "小分"
 
         # --- Rating from simulation edge ---
-        spread_rating = compute_spread_rating(sim["spread_cover_probability"], live_spread)
-        total_rating = compute_total_rating(sim["over_probability"], live_total)
+        spread_rating = compute_spread_rating(combined_spread_prob, live_spread)
+        total_rating = compute_total_rating(combined_total_prob, live_total)
 
-        spread_edge = sim["spread_cover_probability"] - 0.5
-        total_edge = sim["over_probability"] - 0.5
+        spread_edge = combined_spread_prob - 0.5
+        total_edge = combined_total_prob - 0.5
         market = analyze_line_behavior(opening_spread, live_spread, spread_edge, opening_total, live_total, total_edge)
 
         spread_confidence = spread_rating["spread_confidence"]
@@ -253,41 +297,60 @@ def run_prediction(target_date: str | None = None) -> None:
         ])
 
         # --- Step 6: Save prediction to database ---
-        spread_prob = sim["spread_cover_probability"]
-        total_prob = sim["over_probability"]
+        spread_prob = combined_spread_prob
+        total_prob = combined_total_prob
         overall_confidence = max(abs(spread_edge), abs(total_edge))
         overall_stars = max(spread_stars, total_stars)
         recommendation_idx = max(spread_rating["spread_recommendation_index"],
                                  total_rating["total_recommendation_index"])
 
-        insert_prediction(
-            snapshot_date=target_date,
-            row={
-                "game_id": game_id,
-                "home_team": home.get("full_name", ""),
-                "away_team": vis.get("full_name", ""),
-                "prediction_time": datetime.utcnow().isoformat(),
-                "spread_pick": spread_pick,
-                "spread_prob": spread_prob,
-                "total_pick": total_pick,
-                "total_prob": total_prob,
-                "confidence_score": round(overall_confidence, 4),
-                "star_rating": overall_stars,
-                "recommendation_index": recommendation_idx,
-                "expected_home_score": sim["expected_home_score"],
-                "expected_visitor_score": sim["expected_visitor_score"],
-                "simulation_variance": sim["score_distribution_variance"],
-                "opening_spread": opening_spread,
-                "live_spread": live_spread,
-                "opening_total": opening_total,
-                "live_total": live_total,
-                "simulation_runs": sim_count,
-                "odds_source": odds_source,
-                "details": {"simulation": sim, "market": market,
-                            "spread_rating": spread_rating, "total_rating": total_rating},
-            },
-        )
+        prediction_row = {
+            "game_id": game_id,
+            "home_team": home.get("full_name", ""),
+            "away_team": vis.get("full_name", ""),
+            "prediction_time": datetime.utcnow().isoformat(),
+            "spread_pick": spread_pick,
+            "spread_prob": spread_prob,
+            "total_pick": total_pick,
+            "total_prob": total_prob,
+            "confidence_score": round(overall_confidence, 4),
+            "star_rating": overall_stars,
+            "recommendation_index": recommendation_idx,
+            "expected_home_score": sim["expected_home_score"],
+            "expected_visitor_score": sim["expected_visitor_score"],
+            "simulation_variance": sim["score_distribution_variance"],
+            "opening_spread": opening_spread,
+            "live_spread": live_spread,
+            "opening_total": opening_total,
+            "live_total": live_total,
+            "simulation_runs": sim_count,
+            "odds_source": odds_source,
+            "model_version": model_bundle.version,
+            "feature_count": feature_count,
+            "spread_edge": round(spread_edge, 4),
+            "total_edge": round(total_edge, 4),
+            "details": {"simulation": sim, "market": market,
+                        "spread_rating": spread_rating, "total_rating": total_rating},
+        }
+
+        insert_prediction(snapshot_date=target_date, row=prediction_row)
         saved_count += 1
+
+        # --- Supabase persistence ---
+        try:
+            from .supabase_client import save_prediction, save_simulation_log
+            save_prediction(prediction_row)
+            save_simulation_log({
+                "game_id": game_id,
+                "model_version": model_bundle.version,
+                "simulation_runs": sim_count,
+                **sim,
+            })
+        except Exception:
+            logger.debug("Supabase save skipped")
+
+    # --- Saving phase ---
+    progress.advance(4)  # 💾 Saving Results
 
     # --- Step 7: Fail if no games have valid odds ---
     if games and odds_valid_count == 0:
@@ -302,10 +365,14 @@ def run_prediction(target_date: str | None = None) -> None:
     logger.info("Saved predictions: %d", saved_count)
     logger.info("Models present: YES")
     logger.info("Training executed: %s", "YES" if training_executed else "NO")
+    logger.info("Model version: %s", model_bundle.version)
 
     # --- Step 10: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
     send_message("\n".join(lines))
     logger.info("Telegram message sent successfully")
+
+    # --- Completed ---
+    progress.finish()  # ✅ Completed
 
 
 if __name__ == "__main__":

@@ -41,8 +41,8 @@ def run_review(target_date: str | None = None) -> None:
         spread_correct = (r["spread_pick"].endswith("让分") and margin + (r["live_spread"] or 0) > 0) or (
             r["spread_pick"].endswith("受让") and margin + (r["live_spread"] or 0) <= 0
         )
-        total_correct = (r["total_pick"] == "大分" and total > (r["live_total"] or 220)) or (
-            r["total_pick"] == "小分" and total <= (r["live_total"] or 220)
+        total_correct = (r["total_pick"] == "大分" and r["live_total"] is not None and total > r["live_total"]) or (
+            r["total_pick"] == "小分" and r["live_total"] is not None and total <= r["live_total"]
         )
         spread_hits += int(spread_correct)
         total_hits += int(total_correct)

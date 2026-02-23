@@ -25,7 +25,7 @@ class BallDontLieClient:
         "team_season_averages": EndpointSpec("/team_season_averages", {"season", "team_ids[]"}),
         "box_scores": EndpointSpec("/box_scores", {"game_ids[]", "team_ids[]", "per_page", "cursor"}),
         "injuries": EndpointSpec("/injuries", {"team_ids[]", "player_ids[]", "per_page", "cursor"}),
-        "betting_odds": EndpointSpec("/betting_odds", {"game_ids[]", "bookmaker", "per_page", "cursor", "start_date", "end_date"}),
+        "betting_odds": EndpointSpec("/betting_odds", {"game_ids", "bookmaker", "per_page", "cursor", "start_date", "end_date"}),
     }
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None, timeout: int = 30) -> None:

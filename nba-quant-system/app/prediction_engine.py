@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import pandas as pd
@@ -15,6 +16,8 @@ from .rating_engine import compute_ratings
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
 from .telegram_bot import send_message
+
+logger = logging.getLogger(__name__)
 
 
 def _recent_margin(team_id: int) -> float:
@@ -47,8 +50,14 @@ def run_prediction(target_date: str | None = None) -> None:
         home = g["home_team"]
         vis = g["visitor_team"]
 
-        opening_payload = {"data": client.betting_odds(**{"game_ids[]": [game_id], "per_page": 100})}
-        live_payload = {"data": client.betting_odds(**{"game_ids[]": [game_id], "per_page": 100})}
+        try:
+            odds_data = client.betting_odds(game_ids=game_id, per_page=100)
+            opening_payload = {"data": odds_data}
+            live_payload = {"data": odds_data}
+        except Exception:
+            logger.warning("betting_odds unavailable for game %s – continuing without odds", game_id, exc_info=True)
+            opening_payload = {"data": []}
+            live_payload = {"data": []}
         store_opening_and_live(game_id, opening_payload, live_payload)
         opening_spread, opening_total, _ = parse_main_market(opening_payload)
         live_spread, live_total, _ = parse_main_market(live_payload)

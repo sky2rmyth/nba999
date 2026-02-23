@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from .api_client import BallDontLieClient
 from .database import get_conn, save_result
+from .i18n_cn import cn
 from .rating_engine import is_spread_correct, is_total_correct
 from .retrain_engine import ensure_models
 from .telegram_bot import send_message
@@ -52,11 +53,20 @@ def _rolling_performance(days: int = 30) -> dict:
 def run_review(target_date: str | None = None) -> None:
     target_date = target_date or datetime.utcnow().strftime("%Y-%m-%d")
     client = BallDontLieClient()
-    games = client.games(**{"dates[]": [target_date], "per_page": 100})
 
-    for g in games:
-        if not str(g.get("status", "")).startswith("Final"):
-            continue
+    try:
+        games = client.games(**{"dates[]": [target_date], "per_page": 100})
+    except Exception:
+        games = []
+
+    # --- Safety: only process finished games ---
+    finished_games = [g for g in games if str(g.get("status", "")).startswith("Final")]
+
+    if not finished_games:
+        send_message(cn("review_no_games"))
+        return
+
+    for g in finished_games:
         save_result(g["id"], int(g.get("home_team_score", 0)), int(g.get("visitor_team_score", 0)), g)
 
     with get_conn() as conn:
@@ -69,6 +79,10 @@ def run_review(target_date: str | None = None) -> None:
             """,
             (target_date,),
         ).fetchall()
+
+    if not rows:
+        send_message(cn("review_no_games"))
+        return
 
     spread_hits = 0
     total_hits = 0
@@ -104,7 +118,8 @@ def run_review(target_date: str | None = None) -> None:
 
     spread_rate = spread_hits / stake
     total_rate = total_hits / stake
-    roi = ((spread_hits + total_hits) / (2 * stake)) * 2 - 1
+    win_rate = (spread_hits + total_hits) / (2 * stake)
+    roi = win_rate * 2 - 1
 
     # Rolling 30-day performance
     rolling = _rolling_performance(30)
@@ -113,11 +128,12 @@ def run_review(target_date: str | None = None) -> None:
         f"📊 昨日战绩｜{target_date}\n\n"
         f"让分命中率：{spread_rate:.1%}\n"
         f"大小命中率：{total_rate:.1%}\n"
+        f"综合胜率：{win_rate:.1%}\n"
         f"ROI：{roi:.1%}\n"
         f"CLV(初盘)：{clv_open/stake:.2f}\n"
         f"CLV(即时)：{clv_live/stake:.2f}\n"
         f"\n━━━━━━━━━━━━━━━━\n"
-        f"📈 Rolling 30-Day Performance\n"
+        f"📈 近30天滚动表现\n"
         f"让分命中率：{rolling['spread_rate']:.1%}\n"
         f"大小命中率：{rolling['total_rate']:.1%}\n"
         f"ROI：{rolling['roi']:.1%}\n"

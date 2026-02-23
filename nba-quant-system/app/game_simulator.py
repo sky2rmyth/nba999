@@ -38,9 +38,12 @@ def run_possession_simulation(
     total_std = float(np.std(totals))
     variance = float(np.var(totals) + np.var(margins))
 
+    home_win_prob = float(np.mean(margins > 0))
+
     return {
         "spread_cover_probability": spread_cover_prob,
         "over_probability": over_prob,
+        "home_win_probability": home_win_prob,
         "expected_home_score": float(np.mean(home_scores)),
         "expected_visitor_score": float(np.mean(away_scores)),
         "predicted_margin": margin_mean,

@@ -56,7 +56,7 @@ def _extract_line_by_timestamp(
     earliest=True  → opening line (earliest last_update)
     earliest=False → live line (latest last_update)
     """
-    bookmakers = game.get("bookmakers", [])
+    bookmakers = [b for b in game.get("bookmakers", []) if b.get("last_update")]
     if not bookmakers:
         return {"home_spread": None, "away_spread": None, "total_points": None}
 
@@ -68,6 +68,7 @@ def _extract_line_by_timestamp(
     )
 
     home_team = game.get("home_team", "")
+    away_team = game.get("away_team", "")
     home_spread = None
     away_spread = None
     total_points = None
@@ -78,7 +79,7 @@ def _extract_line_by_timestamp(
             for outcome in spread_market.get("outcomes", []):
                 if outcome.get("name") == home_team:
                     home_spread = outcome.get("point")
-                else:
+                elif outcome.get("name") == away_team:
                     away_spread = outcome.get("point")
 
         totals_market = _find_totals_market(bk)

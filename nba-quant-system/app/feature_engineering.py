@@ -60,9 +60,10 @@ def build_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
 
     df = games.merge(odds, on="game_id", how="left")
 
-    # Compute average total across all completed games for default odds
+    # Compute average total across all completed games for default odds.
+    # Fallback 215.0 is the approximate league-wide average NBA game total.
     valid_totals = games.loc[
-        games["home_score"].notna() & games["visitor_score"].notna(),
+        games["home_score"].notna() & games["visitor_score"].notna()
     ]
     avg_total = float(
         (valid_totals["home_score"] + valid_totals["visitor_score"]).mean()

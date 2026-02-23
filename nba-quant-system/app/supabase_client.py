@@ -58,6 +58,7 @@ def save_prediction(row: dict[str, Any]) -> None:
     """Persist a prediction row to Supabase.
 
     All prediction data is stored inside a single ``payload`` JSONB column.
+    Previous predictions for the same game_id are marked as non-final.
     Errors are caught so the prediction pipeline never crashes if logging fails.
     """
     client = _get_client()
@@ -65,6 +66,14 @@ def save_prediction(row: dict[str, Any]) -> None:
         return
     record = dict(row)
     record.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    record["is_final_prediction"] = True
+    try:
+        # Mark previous predictions for this game as non-final
+        client.table("predictions").update(
+            {"payload": {"is_final_prediction": False}}
+        ).eq("game_id", record["game_id"]).execute()
+    except Exception:
+        logger.debug("Supabase: could not update previous predictions — continuing")
     try:
         client.table("predictions").insert({
             "game_id": record["game_id"],
@@ -137,3 +146,22 @@ def save_review_result(row: dict[str, Any]) -> None:
     }
     client.table("review_results").insert(record).execute()
     logger.info("Supabase: review result saved for game %s", row.get("game_id"))
+
+
+def fetch_latest_training_metrics() -> dict[str, Any] | None:
+    """Fetch the latest training log payload from Supabase.
+
+    Returns the payload dict or None if unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = client.table("training_logs").select("payload").order(
+            "id", desc=True
+        ).limit(1).execute()
+        if resp.data:
+            return resp.data[0].get("payload")
+    except Exception:
+        logger.debug("Supabase: could not fetch latest training metrics")
+    return None

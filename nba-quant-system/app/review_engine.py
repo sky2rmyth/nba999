@@ -19,7 +19,7 @@ def _rolling_performance(days: int = 30) -> dict:
                    r.final_home_score, r.final_visitor_score, p.snapshot_date
             FROM predictions_snapshot p
             JOIN results r ON p.game_id = r.game_id
-            WHERE p.snapshot_date >= ?
+            WHERE p.snapshot_date >= ? AND p.is_final_prediction = 1
             ORDER BY p.snapshot_date DESC
             """,
             (cutoff,),
@@ -65,7 +65,7 @@ def run_review(target_date: str | None = None) -> None:
             SELECT p.*, r.final_home_score, r.final_visitor_score
             FROM predictions_snapshot p
             JOIN results r ON p.game_id=r.game_id
-            WHERE p.snapshot_date=?
+            WHERE p.snapshot_date=? AND p.is_final_prediction = 1
             """,
             (target_date,),
         ).fetchall()

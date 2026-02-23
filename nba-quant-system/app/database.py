@@ -64,9 +64,9 @@ def init_db() -> None:
                 live_total REAL,
                 simulation_runs INTEGER NOT NULL DEFAULT 10000,
                 odds_source TEXT NOT NULL DEFAULT 'NONE',
+                is_final_prediction BOOLEAN NOT NULL DEFAULT 1,
                 details_json TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(snapshot_date, game_id)
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS results (
                 game_id INTEGER PRIMARY KEY,
@@ -126,14 +126,19 @@ def insert_odds(game_id: int, line_type: str, payload: dict[str, Any], spread_ho
 
 def insert_prediction(snapshot_date: str, row: dict[str, Any]) -> None:
     with get_conn() as conn:
+        # Mark any previous predictions for this game as non-final
+        conn.execute(
+            "UPDATE predictions_snapshot SET is_final_prediction = 0 WHERE game_id = ?",
+            (row["game_id"],),
+        )
         conn.execute(
             """
-            INSERT OR IGNORE INTO predictions_snapshot(
+            INSERT INTO predictions_snapshot(
                 snapshot_date,game_id,home_team,away_team,prediction_time,spread_pick,spread_prob,total_pick,total_prob,
                 confidence_score,star_rating,recommendation_index,expected_home_score,expected_visitor_score,
                 simulation_variance,opening_spread,live_spread,opening_total,live_total,
-                simulation_runs,odds_source,details_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                simulation_runs,odds_source,is_final_prediction,details_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
             """,
             (
                 snapshot_date,

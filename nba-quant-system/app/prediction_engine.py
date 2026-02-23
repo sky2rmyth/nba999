@@ -85,13 +85,12 @@ def run_prediction(target_date: str | None = None) -> None:
 
     # --- Step 2: Ensure models (auto-train on first run) ---
     progress.advance(2)  # 🧠 Loading Models
-    models_existed_before = _verify_models_present()
     model_bundle = ensure_models()
     if not _verify_models_present():
         logger.error("Models missing after ensure_models — aborting")
         sys.exit(1)
-    logger.info("Models present: YES | Version: %s", model_bundle.version)
-    training_executed = not models_existed_before
+    logger.info("Models present: YES | Version: %s | Source: %s",
+                model_bundle.version, getattr(model_bundle, "source", "unknown"))
 
     # --- Verification: feature count ---
     feature_count = len(FEATURE_COLUMNS)
@@ -364,9 +363,10 @@ def run_prediction(target_date: str | None = None) -> None:
         sys.exit(1)
 
     # --- Step 9: Database validation summary ---
+    model_source = getattr(model_bundle, "source", "unknown")
     logger.info("Saved predictions: %d", saved_count)
     logger.info("Models present: YES")
-    logger.info("Training executed: %s", "YES" if training_executed else "NO")
+    logger.info("MODEL SOURCE: %s", model_source)
     logger.info("Model version: %s", model_bundle.version)
 
     # --- Step 10: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---

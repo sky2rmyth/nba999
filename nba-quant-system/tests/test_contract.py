@@ -283,7 +283,9 @@ class TestWorkflowSchedule:
     def test_review_workflow_scheduled_at_7_utc(self):
         """Review workflow should be scheduled at 7:00 UTC."""
         import yaml
-        with open("/home/runner/work/nba999/nba999/.github/workflows/review.yml") as f:
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        with open(repo_root / ".github" / "workflows" / "review.yml") as f:
             wf = yaml.safe_load(f)
         # PyYAML parses 'on' as True; try both
         on_key = wf.get("on") or wf.get(True)

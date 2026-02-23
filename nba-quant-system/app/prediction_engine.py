@@ -362,14 +362,12 @@ def run_prediction(target_date: str | None = None) -> None:
         # --- Game filter: only send to Telegram if edge/EV/confidence pass ---
         best_confidence = max(spread_confidence, total_confidence)
         if edge_score >= 8 and ev_value > 0 and best_confidence >= 55:
-            if overall_edge_raw > live_spread:
+            if abs(spread_edge) >= abs(total_edge):
                 recommend_dir = spread_pick
             else:
                 recommend_dir = total_pick
             lines.extend([
-                f"🏀 {zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
-                "",
-                f"比赛：{zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",
+                f"🏀 {zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",
                 f"推荐方向：{recommend_dir}",
                 f"概率：{best_prob:.1%}",
                 f"Edge评分：{edge_score:.1f}",

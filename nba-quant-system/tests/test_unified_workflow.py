@@ -141,18 +141,17 @@ def test_save_prediction_payload_contains_is_final():
     assert payload["is_final_prediction"] is True
 
 
-def test_save_prediction_marks_previous_non_final():
-    """save_prediction calls update to mark old predictions as non-final."""
+def test_save_prediction_includes_is_final_flag():
+    """save_prediction sets is_final_prediction=True in the payload."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
 
     supabase_client.save_prediction({"game_id": 42})
 
-    # Verify update was called on the predictions table
-    fake_client.table.assert_any_call("predictions")
-    update_chain = fake_client.table.return_value.update
-    assert update_chain.called
+    inserted = fake_client.table.return_value.insert.call_args[0][0]
+    payload = inserted["payload"]
+    assert payload["is_final_prediction"] is True
 
 
 # ---------- supabase_client: fetch_latest_training_metrics ----------

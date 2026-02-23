@@ -58,7 +58,8 @@ def save_prediction(row: dict[str, Any]) -> None:
     """Persist a prediction row to Supabase.
 
     All prediction data is stored inside a single ``payload`` JSONB column.
-    Previous predictions for the same game_id are marked as non-final.
+    The ``is_final_prediction`` flag is set to ``True`` in the payload so
+    consumers can identify the latest prediction per game.
     Errors are caught so the prediction pipeline never crashes if logging fails.
     """
     client = _get_client()
@@ -67,13 +68,6 @@ def save_prediction(row: dict[str, Any]) -> None:
     record = dict(row)
     record.setdefault("created_at", datetime.now(timezone.utc).isoformat())
     record["is_final_prediction"] = True
-    try:
-        # Mark previous predictions for this game as non-final
-        client.table("predictions").update(
-            {"payload": {"is_final_prediction": False}}
-        ).eq("game_id", record["game_id"]).execute()
-    except Exception:
-        logger.debug("Supabase: could not update previous predictions — continuing")
     try:
         client.table("predictions").insert({
             "game_id": record["game_id"],

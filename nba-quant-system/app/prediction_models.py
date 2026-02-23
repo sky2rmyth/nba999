@@ -1,81 +1,121 @@
 from __future__ import annotations
 
+import logging
 import pickle
+import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import GradientBoostingClassifier
 
 from . import database
 from .feature_engineering import FEATURE_COLUMNS
+
+logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 
 
 class ModelBundle:
-    def __init__(self, spread_model, total_model, algorithm: str):
-        self.spread_model = spread_model
-        self.total_model = total_model
+    def __init__(self, home_score_model, away_score_model, algorithm: str):
+        self.home_score_model = home_score_model
+        self.away_score_model = away_score_model
         self.algorithm = algorithm
 
 
-def _pick_algorithm():
+def _build_regressor():
     try:
-        from lightgbm import LGBMClassifier  # type: ignore
+        from lightgbm import LGBMRegressor  # type: ignore
 
-        return "lightgbm", LGBMClassifier(n_estimators=200, learning_rate=0.05), LGBMClassifier(n_estimators=200, learning_rate=0.05)
+        return "lightgbm", LGBMRegressor(
+            n_estimators=300, learning_rate=0.05, max_depth=8,
+            num_leaves=63, subsample=0.8, colsample_bytree=0.8,
+            random_state=42, verbose=-1,
+        ), LGBMRegressor(
+            n_estimators=300, learning_rate=0.05, max_depth=8,
+            num_leaves=63, subsample=0.8, colsample_bytree=0.8,
+            random_state=42, verbose=-1,
+        )
     except Exception:
-        return "gradient_boosting", GradientBoostingClassifier(random_state=42), GradientBoostingClassifier(random_state=42)
+        from sklearn.ensemble import GradientBoostingRegressor
+        return "gradient_boosting", GradientBoostingRegressor(
+            n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42,
+        ), GradientBoostingRegressor(
+            n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42,
+        )
 
 
 def train_models(df: pd.DataFrame) -> ModelBundle:
-    X = df[FEATURE_COLUMNS]
-    y_spread = df["spread_label"]
-    y_total = df["total_label"]
-    alg, spread_model, total_model = _pick_algorithm()
-    if len(df) < 30:
-        alg = "logistic_regression"
-        spread_model = LogisticRegression(max_iter=500)
-        total_model = LogisticRegression(max_iter=500)
+    feature_count = len(FEATURE_COLUMNS)
+    sample_count = len(df)
+    logger.info("Training samples: %d", sample_count)
+    logger.info("Feature count: %d", feature_count)
 
-    X_train, X_test, ys_train, ys_test = train_test_split(X, y_spread, test_size=0.2, random_state=42)
-    _, _, yt_train, yt_test = train_test_split(X, y_total, test_size=0.2, random_state=42)
+    if feature_count < 30:
+        raise RuntimeError(
+            f"Feature count {feature_count} < 30 — pipeline requires minimum 30 features"
+        )
 
-    spread_model.fit(X_train, ys_train)
-    total_model.fit(X_train, yt_train)
+    X = df[FEATURE_COLUMNS].values
+    y_home = df["home_score"].values
+    y_away = df["away_score"].values
 
-    spread_pred = spread_model.predict(X_test)
-    total_pred = total_model.predict(X_test)
+    alg, home_model, away_model = _build_regressor()
+
+    X_train, X_test, yh_train, yh_test = train_test_split(
+        X, y_home, test_size=0.2, random_state=42
+    )
+    _, _, ya_train, ya_test = train_test_split(
+        X, y_away, test_size=0.2, random_state=42
+    )
+
+    start_time = time.time()
+
+    home_model.fit(X_train, yh_train)
+    away_model.fit(X_train, ya_train)
+
+    duration = round(time.time() - start_time, 2)
+    logger.info("Training duration: %.2f seconds", duration)
+
+    # Evaluation metrics
+    home_pred = home_model.predict(X_test)
+    away_pred = away_model.predict(X_test)
     metrics = {
-        "spread_acc": float(accuracy_score(ys_test, spread_pred)),
-        "total_acc": float(accuracy_score(yt_test, total_pred)),
+        "home_mae": float(mean_absolute_error(yh_test, home_pred)),
+        "home_rmse": float(np.sqrt(mean_squared_error(yh_test, home_pred))),
+        "away_mae": float(mean_absolute_error(ya_test, away_pred)),
+        "away_rmse": float(np.sqrt(mean_squared_error(ya_test, away_pred))),
+        "training_seconds": duration,
     }
-    if len(set(ys_test)) > 1:
-        metrics["spread_auc"] = float(roc_auc_score(ys_test, spread_model.predict_proba(X_test)[:, 1]))
-    if len(set(yt_test)) > 1:
-        metrics["total_auc"] = float(roc_auc_score(yt_test, total_model.predict_proba(X_test)[:, 1]))
+    logger.info("Home Score Model MAE: %.2f  RMSE: %.2f", metrics["home_mae"], metrics["home_rmse"])
+    logger.info("Away Score Model MAE: %.2f  RMSE: %.2f", metrics["away_mae"], metrics["away_rmse"])
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    with open(MODEL_DIR / "spread_model.pkl", "wb") as f:
-        pickle.dump(spread_model, f)
-    with open(MODEL_DIR / "total_model.pkl", "wb") as f:
-        pickle.dump(total_model, f)
+    with open(MODEL_DIR / "home_score_model.pkl", "wb") as f:
+        pickle.dump(home_model, f)
+    with open(MODEL_DIR / "away_score_model.pkl", "wb") as f:
+        pickle.dump(away_model, f)
 
-    database.log_model("spread", alg, len(df), metrics, str(MODEL_DIR / "spread_model.pkl"))
-    database.log_model("total", alg, len(df), metrics, str(MODEL_DIR / "total_model.pkl"))
-    return ModelBundle(spread_model, total_model, alg)
+    database.log_model("home_score", alg, sample_count, metrics, str(MODEL_DIR / "home_score_model.pkl"))
+    database.log_model("away_score", alg, sample_count, metrics, str(MODEL_DIR / "away_score_model.pkl"))
+
+    bundle = ModelBundle(home_model, away_model, alg)
+    bundle.metrics = metrics
+    bundle.sample_count = sample_count
+    bundle.feature_count = feature_count
+    bundle.duration = duration
+    return bundle
 
 
 def load_models() -> ModelBundle | None:
-    sp = MODEL_DIR / "spread_model.pkl"
-    tp = MODEL_DIR / "total_model.pkl"
-    if not sp.exists() or not tp.exists():
+    hp = MODEL_DIR / "home_score_model.pkl"
+    ap = MODEL_DIR / "away_score_model.pkl"
+    if not hp.exists() or not ap.exists():
         return None
-    with open(sp, "rb") as f:
-        spread = pickle.load(f)
-    with open(tp, "rb") as f:
-        total = pickle.load(f)
-    return ModelBundle(spread, total, "loaded")
+    with open(hp, "rb") as f:
+        home = pickle.load(f)
+    with open(ap, "rb") as f:
+        away = pickle.load(f)
+    return ModelBundle(home, away, "loaded")

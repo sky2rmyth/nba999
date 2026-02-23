@@ -6,6 +6,8 @@ from typing import Optional
 
 import requests
 
+from .telegram_text import TEXT
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,22 +80,35 @@ class ProgressTracker:
     """Track and display real-time progress by editing a single Telegram message."""
 
     STAGES = [
-        ("🟡", "System Starting"),
-        ("🔵", "Fetching Games Data"),
-        ("🧠", "Loading Models"),
-        ("⚙️", "Running Monte Carlo Simulation"),
-        ("💾", "Saving Results"),
-        ("✅", "Completed"),
+        ("🟡", TEXT["start"]),
+        ("🔵", TEXT["fetch_data"]),
+        ("🧠", TEXT["load_model"]),
+        ("⚙️", TEXT["simulation"]),
+        ("💾", TEXT["saving"]),
+        ("✅", TEXT["done"]),
     ]
+
+    # Stage indices to show when models are already loaded from Supabase.
+    _SUPABASE_STAGES = {2, 3, 5}  # load_model, simulation, done
 
     def __init__(self) -> None:
         self.message_id: Optional[int] = None
         self.current_stage = -1
         self.game_progress: list[str] = []
+        self.model_source: str | None = None
+
+    def _visible_stages(self) -> list[tuple[int, str, str]]:
+        """Return (index, icon, label) tuples for stages that should be displayed."""
+        stages = []
+        for i, (icon, label) in enumerate(self.STAGES):
+            if self.model_source == "supabase" and i not in self._SUPABASE_STAGES:
+                continue
+            stages.append((i, icon, label))
+        return stages
 
     def _build_text(self) -> str:
-        lines = ["<b>🏀 NBA Quant System</b>", ""]
-        for i, (icon, label) in enumerate(self.STAGES):
+        lines = ["<b>🏀 NBA 量化预测系统</b>", ""]
+        for i, icon, label in self._visible_stages():
             if i < self.current_stage:
                 lines.append(f"✅ {label}")
             elif i == self.current_stage:

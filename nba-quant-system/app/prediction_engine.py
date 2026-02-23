@@ -196,7 +196,7 @@ def run_prediction(target_date: str | None = None) -> None:
 
     # --- Step 7: Fail if no games have valid odds ---
     if games and odds_valid_count == 0:
-        raise RuntimeError("No betting odds returned from balldontlie API")
+        raise RuntimeError("No valid betting odds available for any scheduled games")
 
     # --- Step 8: Verify predictions were saved ---
     if games and saved_count == 0:

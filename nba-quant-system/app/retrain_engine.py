@@ -108,7 +108,7 @@ def ensure_models(force: bool = False):
             logger.debug("Supabase Storage restore failed", exc_info=True)
 
     # Step 3: Train new models + upload to Supabase
-    if cached is None and not _db_has_completed_games():
+    if not _db_has_completed_games():
         logger.info("FIRST RUN TRAINING STARTED")
         bootstrap_historical_data()
     logger.info("Building training dataset...")

@@ -70,11 +70,12 @@ def test_ensure_models_force_triggers_training():
     fake_df.empty = False
 
     with mock.patch("app.retrain_engine.load_models", return_value=fake_cached):
-        with mock.patch("app.retrain_engine.build_training_frame", return_value=fake_df):
-            with mock.patch("app.retrain_engine.train_models", return_value=fake_trained):
-                with mock.patch("app.retrain_engine.FEATURE_COLUMNS", ["f"] * 50):
-                    from app.retrain_engine import ensure_models
-                    result = ensure_models(force=True)
+        with mock.patch("app.retrain_engine._db_has_completed_games", return_value=True):
+            with mock.patch("app.retrain_engine.build_training_frame", return_value=fake_df):
+                with mock.patch("app.retrain_engine.train_models", return_value=fake_trained):
+                    with mock.patch("app.retrain_engine.FEATURE_COLUMNS", ["f"] * 50):
+                        from app.retrain_engine import ensure_models
+                        result = ensure_models(force=True)
 
     assert result is fake_trained
     assert result.source == "Trained new model"

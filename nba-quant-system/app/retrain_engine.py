@@ -41,6 +41,7 @@ def _check_performance_degradation() -> bool:
                        r.final_home_score, r.final_visitor_score
                 FROM predictions_snapshot p
                 JOIN results r ON p.game_id = r.game_id
+                WHERE p.is_final_prediction = 1
                 ORDER BY p.created_at DESC LIMIT 30
                 """
             ).fetchall()

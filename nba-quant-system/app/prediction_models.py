@@ -20,14 +20,17 @@ MODEL_DIR = Path(__file__).resolve().parent.parent / "models"
 VERSION_FILE = MODEL_DIR / "model_version.json"
 
 
+MODEL_FILES = ("home_model.pkl", "away_model.pkl", "spread_model.pkl", "total_model.pkl")
+
+
 def _current_version() -> str:
     """Read persisted model version string."""
     if VERSION_FILE.exists():
         try:
-            return json.loads(VERSION_FILE.read_text()).get("version", "v1")
+            return json.loads(VERSION_FILE.read_text()).get("version", "unknown")
         except Exception:
             pass
-    return "v1"
+    return "unknown"
 
 
 def _bump_version() -> str:
@@ -168,18 +171,18 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
     logger.info("Total Over Accuracy: %.2f%%", to_acc * 100)
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    with open(MODEL_DIR / "home_score_model.pkl", "wb") as f:
+    with open(MODEL_DIR / "home_model.pkl", "wb") as f:
         pickle.dump(home_model, f)
-    with open(MODEL_DIR / "away_score_model.pkl", "wb") as f:
+    with open(MODEL_DIR / "away_model.pkl", "wb") as f:
         pickle.dump(away_model, f)
-    with open(MODEL_DIR / "spread_cover_model.pkl", "wb") as f:
+    with open(MODEL_DIR / "spread_model.pkl", "wb") as f:
         pickle.dump(spread_cover_model, f)
     with open(MODEL_DIR / "total_model.pkl", "wb") as f:
         pickle.dump(total_model, f)
 
-    database.log_model("home_score", alg, sample_count, metrics, str(MODEL_DIR / "home_score_model.pkl"))
-    database.log_model("away_score", alg, sample_count, metrics, str(MODEL_DIR / "away_score_model.pkl"))
-    database.log_model("spread_cover", alg, sample_count, metrics, str(MODEL_DIR / "spread_cover_model.pkl"))
+    database.log_model("home_score", alg, sample_count, metrics, str(MODEL_DIR / "home_model.pkl"))
+    database.log_model("away_score", alg, sample_count, metrics, str(MODEL_DIR / "away_model.pkl"))
+    database.log_model("spread_cover", alg, sample_count, metrics, str(MODEL_DIR / "spread_model.pkl"))
     database.log_model("total_over", alg, sample_count, metrics, str(MODEL_DIR / "total_model.pkl"))
 
     # Supabase training log
@@ -207,8 +210,8 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
 
 
 def load_models() -> ModelBundle | None:
-    hp = MODEL_DIR / "home_score_model.pkl"
-    ap = MODEL_DIR / "away_score_model.pkl"
+    hp = MODEL_DIR / "home_model.pkl"
+    ap = MODEL_DIR / "away_model.pkl"
     if not hp.exists() or not ap.exists():
         return None
     with open(hp, "rb") as f:
@@ -218,7 +221,7 @@ def load_models() -> ModelBundle | None:
 
     spread_cover = None
     total = None
-    sp = MODEL_DIR / "spread_cover_model.pkl"
+    sp = MODEL_DIR / "spread_model.pkl"
     tp = MODEL_DIR / "total_model.pkl"
     if sp.exists():
         with open(sp, "rb") as f:

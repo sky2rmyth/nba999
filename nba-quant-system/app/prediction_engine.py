@@ -15,7 +15,7 @@ from .feature_engineering import FEATURE_COLUMNS, _compute_team_features
 from .game_simulator import run_possession_simulation
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
-from .prediction_models import MODEL_DIR
+from .prediction_models import MODEL_DIR, MODEL_FILES
 from .rating_engine import compute_spread_rating, compute_total_rating
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
@@ -32,9 +32,7 @@ CLASSIFIER_WEIGHT = 0.4
 
 
 def _verify_models_present() -> bool:
-    hp = MODEL_DIR / "home_score_model.pkl"
-    ap = MODEL_DIR / "away_score_model.pkl"
-    return hp.exists() and ap.exists()
+    return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
 
 
 def _match_primary_odds(primary_odds: list, home_name: str, visitor_name: str) -> dict | None:

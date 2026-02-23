@@ -40,6 +40,11 @@ def run_possession_simulation(
 
     home_win_prob = float(np.mean(margins > 0))
 
+    spread_5pct = float(np.percentile(margins, 5))
+    spread_95pct = float(np.percentile(margins, 95))
+    total_5pct = float(np.percentile(totals, 5))
+    total_95pct = float(np.percentile(totals, 95))
+
     return {
         "spread_cover_probability": spread_cover_prob,
         "over_probability": over_prob,
@@ -52,4 +57,8 @@ def run_possession_simulation(
         "total_std": total_std,
         "score_distribution_variance": variance,
         "simulation_count": n_sim,
+        "spread_5pct": spread_5pct,
+        "spread_95pct": spread_95pct,
+        "total_5pct": total_5pct,
+        "total_95pct": total_95pct,
     }

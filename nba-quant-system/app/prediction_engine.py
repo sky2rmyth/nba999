@@ -18,7 +18,7 @@ from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
 from .rating_engine import (
     compute_spread_rating, compute_total_rating,
-    compute_edge_score, compute_ev, compute_kelly_stake, stars_display,
+    compute_edge_score, stars_display,
 )
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
@@ -286,15 +286,12 @@ def run_prediction(target_date: str | None = None) -> None:
         spread_stars = spread_rating["spread_stars"]
         total_stars = total_rating["total_stars"]
 
-        # --- Edge scoring, EV, CLV projection, Kelly ---
+        # --- Edge scoring ---
         overall_edge_raw = max(abs(spread_edge), abs(total_edge)) * 100.0
         edge_score = compute_edge_score(
             max(combined_spread_prob, combined_total_prob)
         )
-        best_prob = max(combined_spread_prob, combined_total_prob)
-        ev_value = compute_ev(best_prob)
         clv_projection = round((live_spread - opening_spread) if opening_spread and live_spread else 0.0, 2)
-        kelly = compute_kelly_stake(best_prob)
 
         # --- Step 6: Save prediction to database ---
         spread_prob = combined_spread_prob
@@ -330,10 +327,7 @@ def run_prediction(target_date: str | None = None) -> None:
             "spread_edge": round(spread_edge, 4),
             "total_edge": round(total_edge, 4),
             "edge_score": edge_score,
-            "ev_value": ev_value,
             "clv_projection": clv_projection,
-            "recommended_stake": kelly["recommended_stake"],
-            "bankroll_after_bet": kelly["bankroll_after_bet"],
             "home_win_probability": sim.get("home_win_probability", 0.0),
             "details": {"simulation": sim, "market": market,
                         "spread_rating": spread_rating, "total_rating": total_rating},
@@ -359,30 +353,32 @@ def run_prediction(target_date: str | None = None) -> None:
             **sim,
         })
 
-        # --- Game filter: only send to Telegram if edge/EV/confidence pass ---
-        best_confidence = max(spread_confidence, total_confidence)
-        if edge_score >= 8 and ev_value > 0 and best_confidence >= 55:
-            if abs(spread_edge) >= abs(total_edge):
-                recommend_dir = spread_pick
-            else:
-                recommend_dir = total_pick
-            lines.extend([
-                f"🏀 {zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",
-                f"推荐方向：{recommend_dir}",
-                f"概率：{best_prob:.1%}",
-                f"Edge评分：{edge_score:.1f}",
-                f"EV：{ev_value:+.4f}",
-                f"星级：{stars_display(overall_stars)}",
-                f"建议投注比例：{kelly['recommended_stake']:.0f}",
-                "",
-                f"胜负概率：主队 {sim.get('home_win_probability', 0):.1%}",
-                f"让分覆盖概率：{combined_spread_prob:.1%}",
-                f"大小分概率：大 {combined_total_prob:.1%}",
-                f"期望比分：{sim['expected_home_score']:.1f} - {sim['expected_visitor_score']:.1f}",
-                "",
-                "━━━━━━━━━━━━━━━━",
-            ])
-            telegram_count += 1
+        # --- Output for every game (no filtering) ---
+        spread_range = f"{sim['spread_5pct']:.1f} → {sim['spread_95pct']:.1f}"
+        total_range = f"{sim['total_5pct']:.1f} → {sim['total_95pct']:.1f}"
+
+        lines.extend([
+            f"🏀 {zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",
+            "------------------------------------------------",
+            "",
+            "【让分盘】",
+            f"盘口：{live_spread:+.1f}",
+            f"模型预测分差：{predicted_margin:+.1f}",
+            f"推荐方向：{spread_pick}",
+            f"覆盖概率：{combined_spread_prob:.1%}",
+            "",
+            f"模拟分差区间：{spread_range}",
+            "",
+            "【大小分】",
+            f"盘口：{live_total:.1f}",
+            f"模型预测总分：{predicted_total:.1f}",
+            f"推荐方向：{total_pick}",
+            f"概率：{combined_total_prob:.1%}",
+            "",
+            f"模拟总分区间：{total_range}",
+            "",
+            "━━━━━━━━━━━━━━━━",
+        ])
 
     # --- Saving phase ---
     progress.advance(4)

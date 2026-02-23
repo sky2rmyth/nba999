@@ -119,7 +119,6 @@ def run_review(target_date: str | None = None) -> None:
     spread_rate = spread_hits / stake
     total_rate = total_hits / stake
     win_rate = (spread_hits + total_hits) / (2 * stake)
-    roi = win_rate * 2 - 1
 
     # Rolling 30-day performance
     rolling = _rolling_performance(30)
@@ -129,14 +128,12 @@ def run_review(target_date: str | None = None) -> None:
         f"让分命中率：{spread_rate:.1%}\n"
         f"大小命中率：{total_rate:.1%}\n"
         f"综合胜率：{win_rate:.1%}\n"
-        f"ROI：{roi:.1%}\n"
         f"CLV(初盘)：{clv_open/stake:.2f}\n"
         f"CLV(即时)：{clv_live/stake:.2f}\n"
         f"\n━━━━━━━━━━━━━━━━\n"
         f"📈 近30天滚动表现\n"
         f"让分命中率：{rolling['spread_rate']:.1%}\n"
         f"大小命中率：{rolling['total_rate']:.1%}\n"
-        f"ROI：{rolling['roi']:.1%}\n"
         f"样本数：{rolling['count']}"
     )
     send_message(msg)

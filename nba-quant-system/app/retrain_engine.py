@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import logging
 
-from .database import get_conn
+from .data_pipeline import bootstrap_historical_data
+from .database import get_conn, init_db
 from .feature_engineering import build_training_frame
 from .prediction_models import load_models, train_models
 
 logger = logging.getLogger(__name__)
+
+
+def _db_has_completed_games() -> bool:
+    init_db()
+    with get_conn() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM games WHERE status LIKE 'Final%'"
+        ).fetchone()[0]
+    return count > 0
 
 
 def should_retrain(force: bool = False) -> bool:
@@ -24,9 +34,13 @@ def ensure_models(force: bool = False):
     if should_retrain(force=force):
         if first_run:
             logger.info("FIRST RUN TRAINING STARTED")
+            if not _db_has_completed_games():
+                bootstrap_historical_data()
+        logger.info("Building training dataset...")
         df = build_training_frame()
         if df.empty:
             raise RuntimeError("No historical data available for training")
+        logger.info("Training models...")
         bundle = train_models(df)
         logger.info("Training executed: YES | Algorithm: %s", bundle.algorithm)
         return bundle

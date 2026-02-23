@@ -45,6 +45,8 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 snapshot_date TEXT NOT NULL,
                 game_id INTEGER NOT NULL,
+                home_team TEXT,
+                away_team TEXT,
                 prediction_time TEXT NOT NULL,
                 spread_pick TEXT NOT NULL,
                 spread_prob REAL NOT NULL,
@@ -61,6 +63,7 @@ def init_db() -> None:
                 opening_total REAL,
                 live_total REAL,
                 details_json TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(snapshot_date, game_id)
             );
             CREATE TABLE IF NOT EXISTS results (
@@ -124,14 +127,16 @@ def insert_prediction(snapshot_date: str, row: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT OR IGNORE INTO predictions_snapshot(
-                snapshot_date,game_id,prediction_time,spread_pick,spread_prob,total_pick,total_prob,
+                snapshot_date,game_id,home_team,away_team,prediction_time,spread_pick,spread_prob,total_pick,total_prob,
                 confidence_score,star_rating,recommendation_index,expected_home_score,expected_visitor_score,
                 simulation_variance,opening_spread,live_spread,opening_total,live_total,details_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 snapshot_date,
                 row["game_id"],
+                row.get("home_team"),
+                row.get("away_team"),
                 row["prediction_time"],
                 row["spread_pick"],
                 row["spread_prob"],

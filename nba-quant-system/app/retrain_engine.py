@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from .database import get_conn
 from .feature_engineering import build_training_frame
 from .prediction_models import load_models, train_models
+
+logger = logging.getLogger(__name__)
 
 
 def should_retrain(force: bool = False) -> bool:
@@ -16,12 +20,18 @@ def should_retrain(force: bool = False) -> bool:
 
 
 def ensure_models(force: bool = False):
+    first_run = load_models() is None
     if should_retrain(force=force):
+        if first_run:
+            logger.info("FIRST RUN TRAINING STARTED")
         df = build_training_frame()
         if df.empty:
             raise RuntimeError("No historical data available for training")
-        return train_models(df)
+        bundle = train_models(df)
+        logger.info("Training executed: YES | Algorithm: %s", bundle.algorithm)
+        return bundle
     bundle = load_models()
     if bundle is None:
         raise RuntimeError("Model files missing")
+    logger.info("Training executed: NO | Models loaded from disk")
     return bundle

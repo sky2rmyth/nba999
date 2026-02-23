@@ -35,4 +35,5 @@ def run_possession_simulation(
         "expected_home_score": float(np.mean(home_scores)),
         "expected_visitor_score": float(np.mean(visitor_scores)),
         "score_distribution_variance": variance,
+        "simulation_count": n_sim,
     }

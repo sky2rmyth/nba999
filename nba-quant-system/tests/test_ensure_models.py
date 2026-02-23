@@ -74,11 +74,62 @@ def test_ensure_models_force_triggers_training():
             with mock.patch("app.retrain_engine.build_training_frame", return_value=fake_df):
                 with mock.patch("app.retrain_engine.train_models", return_value=fake_trained):
                     with mock.patch("app.retrain_engine.FEATURE_COLUMNS", ["f"] * 50):
-                        from app.retrain_engine import ensure_models
-                        result = ensure_models(force=True)
+                        with mock.patch("app.supabase_client.upload_models_to_storage", return_value=True):
+                            from app.retrain_engine import ensure_models
+                            result = ensure_models(force=True)
 
     assert result is fake_trained
     assert result.source == "Trained new model"
+
+
+# ---------- ensure_models: upload called after training ----------
+
+def test_ensure_models_uploads_models_after_training():
+    """After training, ensure_models uploads models to Supabase Storage."""
+    fake_trained = mock.MagicMock()
+    fake_trained.version = "v6"
+    fake_trained.algorithm = "lightgbm"
+    fake_trained.metrics = {}
+    fake_trained.duration = 1.0
+
+    fake_df = mock.MagicMock()
+    fake_df.empty = False
+
+    with mock.patch("app.retrain_engine.load_models", return_value=None):
+        with mock.patch("app.supabase_client.download_models_from_storage", return_value=False):
+            with mock.patch("app.retrain_engine._db_has_completed_games", return_value=True):
+                with mock.patch("app.retrain_engine.build_training_frame", return_value=fake_df):
+                    with mock.patch("app.retrain_engine.train_models", return_value=fake_trained):
+                        with mock.patch("app.retrain_engine.FEATURE_COLUMNS", ["f"] * 50):
+                            with mock.patch("app.supabase_client.upload_models_to_storage", return_value=True) as mock_upload:
+                                from app.retrain_engine import ensure_models
+                                result = ensure_models(force=False)
+
+    mock_upload.assert_called_once()
+    assert result.source == "Trained new model"
+
+
+def test_ensure_models_raises_when_upload_fails():
+    """ensure_models raises RuntimeError when model upload fails."""
+    fake_trained = mock.MagicMock()
+    fake_trained.version = "v6"
+    fake_trained.algorithm = "lightgbm"
+    fake_trained.metrics = {}
+    fake_trained.duration = 1.0
+
+    fake_df = mock.MagicMock()
+    fake_df.empty = False
+
+    with mock.patch("app.retrain_engine.load_models", return_value=None):
+        with mock.patch("app.supabase_client.download_models_from_storage", return_value=False):
+            with mock.patch("app.retrain_engine._db_has_completed_games", return_value=True):
+                with mock.patch("app.retrain_engine.build_training_frame", return_value=fake_df):
+                    with mock.patch("app.retrain_engine.train_models", return_value=fake_trained):
+                        with mock.patch("app.retrain_engine.FEATURE_COLUMNS", ["f"] * 50):
+                            with mock.patch("app.supabase_client.upload_models_to_storage", return_value=False):
+                                from app.retrain_engine import ensure_models
+                                with pytest.raises(RuntimeError, match="Failed to upload models"):
+                                    ensure_models(force=False)
 
 
 # ---------- ModelBundle has source attribute ----------

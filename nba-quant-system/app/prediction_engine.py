@@ -77,20 +77,26 @@ def run_prediction(target_date: str | None = None) -> None:
 
     # --- Progress tracker ---
     progress = ProgressTracker()
-    progress.start()  # 🟡 System Starting
 
-    # --- Step 1: Bootstrap historical data ---
-    progress.advance(1)  # 🔵 Fetching Games Data
-    bootstrap_historical_data()
-
-    # --- Step 2: Ensure models (auto-train on first run) ---
-    progress.advance(2)  # 🧠 Loading Models
+    # --- Step 2: Ensure models first to determine source ---
     model_bundle = ensure_models()
     if not _verify_models_present():
         logger.error("Models missing after ensure_models — aborting")
         sys.exit(1)
+    model_source = getattr(model_bundle, "source", "unknown")
     logger.info("Models present: YES | Version: %s | Source: %s",
-                model_bundle.version, getattr(model_bundle, "source", "unknown"))
+                model_bundle.version, model_source)
+
+    # Set model source on tracker so Supabase-loaded models skip boot stages
+    progress.model_source = model_source
+    progress.start()
+
+    # --- Step 1: Bootstrap historical data ---
+    progress.advance(1)
+    bootstrap_historical_data()
+
+    # --- Loading Models stage ---
+    progress.advance(2)
 
     # --- Verification: feature count ---
     feature_count = len(FEATURE_COLUMNS)
@@ -107,7 +113,7 @@ def run_prediction(target_date: str | None = None) -> None:
     primary_odds = fetch_today_odds()
 
     # --- Monte Carlo phase ---
-    progress.advance(3)  # ⚙️ Running Monte Carlo Simulation
+    progress.advance(3)
 
     lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
@@ -351,7 +357,7 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
     # --- Saving phase ---
-    progress.advance(4)  # 💾 Saving Results
+    progress.advance(4)
 
     # --- Step 7: Fail if no games have valid odds ---
     if games and odds_valid_count == 0:
@@ -374,7 +380,7 @@ def run_prediction(target_date: str | None = None) -> None:
     logger.info("Telegram message sent successfully")
 
     # --- Completed ---
-    progress.finish()  # ✅ Completed
+    progress.finish()
 
 
 if __name__ == "__main__":

@@ -5,12 +5,14 @@ import logging
 from .data_pipeline import bootstrap_historical_data
 from .database import get_conn, init_db
 from .feature_engineering import FEATURE_COLUMNS, build_training_frame
+from .i18n_cn import cn
 from .prediction_models import load_models, train_models, _current_version, MODEL_DIR
 from .rating_engine import is_spread_correct, is_total_correct
 
 logger = logging.getLogger(__name__)
 
 PERFORMANCE_THRESHOLD = 0.45  # retrain if accuracy drops below 45%
+MIN_RETRAIN_GAMES = 50  # minimum new finished games before retraining
 
 
 def _try_send_telegram(text: str) -> None:
@@ -71,16 +73,26 @@ def _check_performance_degradation() -> bool:
     return False
 
 
+def _count_new_finished_games() -> int:
+    """Return the number of finished games not yet reviewed."""
+    try:
+        with get_conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) c FROM games g LEFT JOIN results r "
+                "ON g.game_id=r.game_id "
+                "WHERE g.status LIKE 'Final%%' AND r.game_id IS NULL"
+            ).fetchone()[0]
+    except Exception:
+        return 0
+
+
 def should_retrain(force: bool = False) -> bool:
     if force:
         return True
     if _check_performance_degradation():
         return True
-    with get_conn() as conn:
-        pending = conn.execute(
-            "SELECT COUNT(*) c FROM games g LEFT JOIN results r ON g.game_id=r.game_id WHERE g.status LIKE 'Final%' AND r.game_id IS NULL"
-        ).fetchone()[0]
-    return pending >= 50 or load_models() is None
+    new_games = _count_new_finished_games()
+    return new_games >= MIN_RETRAIN_GAMES or load_models() is None
 
 
 def ensure_models(force: bool = False):
@@ -88,8 +100,8 @@ def ensure_models(force: bool = False):
     cached = load_models()
     if cached is not None and not force:
         logger.info("MODEL SOURCE: Using cached model | Version: %s", cached.version)
-        _try_send_telegram("📦 MODEL SOURCE: Using cached model")
-        cached.source = "Using cached model"
+        _try_send_telegram(cn("model_cached"))
+        cached.source = "cached"
         return cached
 
     # Step 2: Try restoring from Supabase Storage before training
@@ -99,26 +111,37 @@ def ensure_models(force: bool = False):
             restored = load_models()
             if restored is not None:
                 logger.info("MODEL SOURCE: Loaded from Supabase | Version: %s", restored.version)
-                _try_send_telegram("📦 MODEL SOURCE: Loaded from Supabase")
-                restored.source = "Loaded from Supabase"
+                _try_send_telegram(cn("model_loaded"))
+                restored.source = "supabase"
                 return restored
     except Exception:
         logger.debug("Supabase Storage restore failed", exc_info=True)
 
-    # Step 3: Train new models + upload to Supabase
+    # Step 3: Check if enough new games to justify retraining
+    new_games = _count_new_finished_games()
+    if cached is not None and new_games < MIN_RETRAIN_GAMES:
+        logger.info("Only %d new finished games (< %d) — reusing cached model",
+                     new_games, MIN_RETRAIN_GAMES)
+        _try_send_telegram(cn("skip_retrain_insufficient", min_games=MIN_RETRAIN_GAMES))
+        cached.source = "cached"
+        return cached
+
+    # Step 4: Train new models + upload to Supabase
+    _try_send_telegram(cn("training_start"))
+
     if not _db_has_completed_games():
         logger.info("FIRST RUN TRAINING STARTED")
         bootstrap_historical_data()
     logger.info("Building training dataset...")
-    _try_send_telegram("构建训练数据集...")
+    _try_send_telegram(cn("building_dataset"))
     df = build_training_frame()
     if df.empty:
         raise RuntimeError("No historical data available for training")
 
     feature_count = len(FEATURE_COLUMNS)
     sample_count = len(df)
-    _try_send_telegram(f"特征数量: {feature_count}")
-    _try_send_telegram(f"训练样本数: {sample_count}")
+    _try_send_telegram(cn("feature_count", feature_count=feature_count))
+    _try_send_telegram(cn("sample_count", sample_count=sample_count))
 
     logger.info("Training models...")
     bundle = train_models(df)
@@ -127,20 +150,15 @@ def ensure_models(force: bool = False):
     duration = getattr(bundle, "duration", 0)
     sc_acc = bundle.metrics.get("spread_cover_accuracy", 0)
     to_acc = bundle.metrics.get("total_over_accuracy", 0)
-    report = (
-        "📊 模型训练报告\n\n"
-        f"版本: {bundle.version}\n"
-        "训练方式: Hybrid Architecture\n"
-        f"模型: LightGBM\n"
-        f"训练样本: {sample_count}\n"
-        f"特征数量: {feature_count}\n"
-        f"训练耗时: {duration:.1f} 秒\n"
-        "主队得分模型: 完成\n"
-        "客队得分模型: 完成\n"
-        f"让分覆盖模型: 完成 ({sc_acc:.1%})\n"
-        f"大小分模型: 完成 ({to_acc:.1%})"
-    )
+    report = cn("training_report",
+                version=bundle.version,
+                sample_count=sample_count,
+                feature_count=feature_count,
+                duration=duration,
+                sc_acc=sc_acc,
+                to_acc=to_acc)
     _try_send_telegram(report)
+    _try_send_telegram(cn("training_done"))
 
     # --- Log training to Supabase ---
     from .supabase_client import save_training_log
@@ -159,11 +177,12 @@ def ensure_models(force: bool = False):
     # --- Upload models to Supabase Storage ---
     from .supabase_client import upload_models_to_storage
     logger.info("Uploading models to Supabase Storage...")
+    _try_send_telegram(cn("upload_models"))
     if not upload_models_to_storage(MODEL_DIR):
         raise RuntimeError("Failed to upload models to Supabase Storage")
     logger.info("Models upload complete")
 
     logger.info("MODEL SOURCE: Trained new model | Algorithm: %s | Version: %s", bundle.algorithm, bundle.version)
-    _try_send_telegram("📦 MODEL SOURCE: Trained new model")
-    bundle.source = "Trained new model"
+    _try_send_telegram(cn("model_trained"))
+    bundle.source = "trained"
     return bundle

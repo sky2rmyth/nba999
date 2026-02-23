@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 
+from .i18n_cn import cn
 from .prediction_models import MODEL_DIR, MODEL_FILES, VERSION_FILE, _current_version
 from .telegram_bot import send_message
 
@@ -29,6 +30,18 @@ def _load_model_status() -> dict:
     # --- Verify model files ---
     missing = [f for f in MODEL_FILES if not (MODEL_DIR / f).exists()]
     model_available = len(missing) == 0
+
+    # --- If models missing locally, try restoring from Supabase ---
+    if not model_available:
+        try:
+            from .supabase_client import download_models_from_storage
+            if download_models_from_storage(MODEL_DIR):
+                missing = [f for f in MODEL_FILES if not (MODEL_DIR / f).exists()]
+                model_available = len(missing) == 0
+                version = _current_version()
+                logger.info("Models restored from Supabase for status check")
+        except Exception:
+            logger.debug("Supabase model restore failed during status check", exc_info=True)
 
     # --- Latest metrics: prefer Supabase, fall back to local DB ---
     metrics: dict = {}
@@ -106,16 +119,14 @@ def run_model_status() -> None:
     if isinstance(to_acc, float):
         to_acc = f"{to_acc:.1%}"
 
-    msg = (
-        f"📈 模型状态报告\n\n"
-        f"版本: {version}\n"
-        f"模型可用: {'✅' if model_available else '❌'}\n"
-        f"训练样本: {training_samples}\n"
-        f"MAE: {mae_display}\n"
-        f"让分覆盖准确率: {sc_acc}\n"
-        f"大小分准确率: {to_acc}\n"
-        f"最后训练: {last_trained}"
-    )
+    msg = cn("model_status_report",
+             version=version,
+             available='✅' if model_available else '❌',
+             training_samples=training_samples,
+             mae_display=mae_display,
+             sc_acc=sc_acc,
+             to_acc=to_acc,
+             last_trained=last_trained)
     send_message(msg)
     logger.info("Model status sent to Telegram")
 

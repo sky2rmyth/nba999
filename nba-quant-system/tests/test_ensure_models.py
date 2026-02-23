@@ -82,6 +82,27 @@ def test_ensure_models_force_triggers_training():
     assert result.source == "Trained new model"
 
 
+# ---------- ensure_models: force skips training when Supabase has models ----------
+
+def test_ensure_models_force_uses_supabase_when_available():
+    """When force=True but Supabase has models, download and use them instead of training."""
+    fake_cached = mock.MagicMock()
+    fake_cached.version = "v5"
+
+    fake_restored = mock.MagicMock()
+    fake_restored.version = "v7"
+
+    # load_models: first call returns cached (skipped due to force), second returns restored
+    with mock.patch("app.retrain_engine.load_models", side_effect=[fake_cached, fake_restored]):
+        with mock.patch("app.supabase_client.download_models_from_storage", return_value=True) as mock_download:
+            from app.retrain_engine import ensure_models
+            result = ensure_models(force=True)
+
+    mock_download.assert_called_once()
+    assert result is fake_restored
+    assert result.source == "Loaded from Supabase"
+
+
 # ---------- ensure_models: upload called after training ----------
 
 def test_ensure_models_uploads_models_after_training():

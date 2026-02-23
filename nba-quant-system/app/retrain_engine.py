@@ -92,19 +92,18 @@ def ensure_models(force: bool = False):
         cached.source = "Using cached model"
         return cached
 
-    # Step 2: If models missing locally, try restoring from Supabase Storage
-    if cached is None:
-        try:
-            from .supabase_client import download_models_from_storage
-            if download_models_from_storage(MODEL_DIR):
-                restored = load_models()
-                if restored is not None:
-                    logger.info("MODEL SOURCE: Loaded from Supabase | Version: %s", restored.version)
-                    _try_send_telegram("📦 MODEL SOURCE: Loaded from Supabase")
-                    restored.source = "Loaded from Supabase"
-                    return restored
-        except Exception:
-            logger.debug("Supabase Storage restore failed", exc_info=True)
+    # Step 2: Try restoring from Supabase Storage before training
+    try:
+        from .supabase_client import download_models_from_storage
+        if download_models_from_storage(MODEL_DIR):
+            restored = load_models()
+            if restored is not None:
+                logger.info("MODEL SOURCE: Loaded from Supabase | Version: %s", restored.version)
+                _try_send_telegram("📦 MODEL SOURCE: Loaded from Supabase")
+                restored.source = "Loaded from Supabase"
+                return restored
+    except Exception:
+        logger.debug("Supabase Storage restore failed", exc_info=True)
 
     # Step 3: Train new models + upload to Supabase
     if not _db_has_completed_games():

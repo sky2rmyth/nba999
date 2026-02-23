@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+*.sqlite
+nba-quant-system/models/
+nba-quant-system/data/

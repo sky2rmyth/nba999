@@ -4,18 +4,19 @@ import logging
 import sys
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from .api_client import BallDontLieClient
 from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games
-from .feature_engineering import FEATURE_COLUMNS
+from .feature_engineering import FEATURE_COLUMNS, _compute_team_features
 from .game_simulator import run_possession_simulation
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR
-from .rating_engine import compute_ratings
+from .rating_engine import compute_spread_rating, compute_total_rating
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
 from .telegram_bot import send_message
@@ -25,26 +26,10 @@ logger = logging.getLogger(__name__)
 MIN_SIMULATION_COUNT = 10000
 
 
-def _recent_margin(team_id: int) -> float:
-    with get_conn() as conn:
-        rows = conn.execute(
-            """SELECT home_team_id, visitor_team_id, home_score, visitor_score FROM games
-            WHERE status LIKE 'Final%' AND (home_team_id=? OR visitor_team_id=?)
-            ORDER BY date DESC LIMIT 10""",
-            (team_id, team_id),
-        ).fetchall()
-    if not rows:
-        return 0.0
-    vals = []
-    for r in rows:
-        vals.append((r[2] - r[3]) if r[0] == team_id else (r[3] - r[2]))
-    return sum(vals) / len(vals)
-
-
 def _verify_models_present() -> bool:
-    sp = MODEL_DIR / "spread_model.pkl"
-    tp = MODEL_DIR / "total_model.pkl"
-    return sp.exists() and tp.exists()
+    hp = MODEL_DIR / "home_score_model.pkl"
+    ap = MODEL_DIR / "away_score_model.pkl"
+    return hp.exists() and ap.exists()
 
 
 def _match_primary_odds(primary_odds: list, home_name: str, visitor_name: str) -> dict | None:
@@ -58,6 +43,29 @@ def _match_primary_odds(primary_odds: list, home_name: str, visitor_name: str) -
             (visitor_name.lower() in event_away.lower() or event_away.lower() in visitor_name.lower())):
             return event
     return None
+
+
+def _build_prediction_features(home_id: int, away_id: int) -> pd.DataFrame:
+    """Build feature row for prediction using live game data."""
+    with get_conn() as conn:
+        # Use tomorrow's date to include all available data
+        future_date = "9999-12-31"
+        home_feat = _compute_team_features(conn, home_id, away_id, future_date, "home")
+        away_feat = _compute_team_features(conn, away_id, home_id, future_date, "away")
+
+    row = {}
+    row.update(home_feat)
+    row.update(away_feat)
+    row["home_indicator"] = 1.0
+    home_pace = row.get("home_pace", 98.0)
+    away_pace = row.get("away_pace", 98.0)
+    row["pace_interaction"] = home_pace * away_pace / 100.0
+
+    feat = pd.DataFrame([row])
+    for col in FEATURE_COLUMNS:
+        if col not in feat.columns:
+            feat[col] = 0.0
+    return feat[FEATURE_COLUMNS]
 
 
 def run_prediction(target_date: str | None = None) -> None:
@@ -75,6 +83,13 @@ def run_prediction(target_date: str | None = None) -> None:
         sys.exit(1)
     logger.info("Models present: YES")
     training_executed = not models_existed_before
+
+    # --- Verification: feature count ---
+    feature_count = len(FEATURE_COLUMNS)
+    logger.info("Feature count: %d", feature_count)
+    if feature_count < 30:
+        logger.error("Feature count %d < 30 — aborting", feature_count)
+        sys.exit(1)
 
     # --- Step 3: Fetch today's games ---
     client = BallDontLieClient()
@@ -155,29 +170,30 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("  Opening Total: %s", opening_total)
         logger.info("  Live Total: %s", live_total)
 
-        hrm = _recent_margin(home["id"])
-        vrm = _recent_margin(vis["id"])
-        feat = pd.DataFrame([
-            {
-                "home_recent_margin": hrm,
-                "visitor_recent_margin": vrm,
-                "margin_diff": hrm - vrm,
-                "opening_spread": opening_spread,
-                "live_spread": live_spread,
-                "opening_total": opening_total,
-                "live_total": live_total,
-            }
-        ])[FEATURE_COLUMNS]
+        # --- Build features and predict scores ---
+        feat = _build_prediction_features(home["id"], vis["id"])
 
-        spread_prob = float(model_bundle.spread_model.predict_proba(feat)[:, 1][0])
-        total_prob = float(model_bundle.total_model.predict_proba(feat)[:, 1][0])
+        predicted_home_score = float(model_bundle.home_score_model.predict(feat)[0])
+        predicted_away_score = float(model_bundle.away_score_model.predict(feat)[0])
+
+        predicted_margin = predicted_home_score - predicted_away_score
+        predicted_total = predicted_home_score + predicted_away_score
+
+        logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
+        logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
+
+        # --- Compute variance from recent games ---
+        home_feat_row = feat.iloc[0]
+        home_var = max(float(home_feat_row.get("home_scoring_variance", 64.0)), 64.0)
+        away_var = max(float(home_feat_row.get("away_scoring_variance", 64.0)), 64.0)
 
         # --- Step 4: Monte Carlo simulation ---
         sim = run_possession_simulation(
             game_id=game_id,
-            home_off_rating=112 + hrm,
-            visitor_off_rating=112 + vrm,
-            pace=98,
+            predicted_home_score=predicted_home_score,
+            predicted_away_score=predicted_away_score,
+            home_variance=home_var,
+            away_variance=away_var,
             spread_line=live_spread,
             total_line=live_total,
             n_sim=MIN_SIMULATION_COUNT,
@@ -190,25 +206,60 @@ def run_prediction(target_date: str | None = None) -> None:
             sys.exit(1)
         logger.info("Simulation runs: %d (game_id=%s)", sim_count, game_id)
 
+        # --- Spread decision: based on predicted margin vs market spread ---
+        # If predicted_margin > market_spread (negative means home favored) → pick favorite
+        # spread_line is from home perspective (e.g. -4.5 means home favored by 4.5)
+        if predicted_margin > -live_spread:
+            spread_pick = f"主队 {zh_name(home['full_name'])} {live_spread:+.1f}"
+            spread_pick_label = "home_cover"
+        else:
+            spread_pick = f"客队 {zh_name(vis['full_name'])} {-live_spread:+.1f}（受让）"
+            spread_pick_label = "away_cover"
+
+        # --- Total decision: based on predicted total vs market total ---
+        if predicted_total > live_total:
+            total_pick = "大分"
+        else:
+            total_pick = "小分"
+
+        # --- Rating from simulation edge ---
+        spread_rating = compute_spread_rating(sim["spread_cover_probability"], live_spread)
+        total_rating = compute_total_rating(sim["over_probability"], live_total)
+
         spread_edge = sim["spread_cover_probability"] - 0.5
         total_edge = sim["over_probability"] - 0.5
         market = analyze_line_behavior(opening_spread, live_spread, spread_edge, opening_total, live_total, total_edge)
-        ratings = compute_ratings(max(abs(spread_edge), abs(total_edge)), sim["score_distribution_variance"], market["market_confidence_indicator"])
 
-        spread_pick = f"{zh_name(home['full_name'])}让分" if spread_prob >= 0.5 else f"{zh_name(vis['full_name'])}受让"
-        total_pick = "大分" if total_prob >= 0.5 else "小分"
+        spread_confidence = spread_rating["spread_confidence"]
+        total_confidence = total_rating["total_confidence"]
+        spread_stars = spread_rating["spread_stars"]
+        total_stars = total_rating["total_stars"]
 
-        lines.extend(
-            [
-                f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
-                f"让：{opening_spread:+.1f} → {spread_pick} {'⭐' * int(ratings['star_rating'])} {spread_prob*100:.0f}% 指{int(ratings['recommendation_index'])}",
-                f"大：{opening_total:.1f} → {total_pick} {'⭐' * max(1, int(ratings['star_rating'])-1)} {total_prob*100:.0f}% 指{int(ratings['recommendation_index'])}",
-                "",
-                "━━━━━━━━━━━━━━━━",
-            ]
-        )
+        # --- Telegram format (Part 8) ---
+        lines.extend([
+            f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
+            "",
+            "让分：",
+            f"主队 {zh_name(home['full_name'])} {live_spread:+.1f}",
+            f"推荐：{spread_pick}",
+            f"信心：{spread_confidence:.0f}%",
+            "",
+            "大小：",
+            f"{live_total:.1f}",
+            f"推荐：{total_pick}",
+            f"信心：{total_confidence:.0f}%",
+            "",
+            "━━━━━━━━━━━━━━━━",
+        ])
 
         # --- Step 6: Save prediction to database ---
+        spread_prob = sim["spread_cover_probability"]
+        total_prob = sim["over_probability"]
+        overall_confidence = max(abs(spread_edge), abs(total_edge))
+        overall_stars = max(spread_stars, total_stars)
+        recommendation_idx = max(spread_rating["spread_recommendation_index"],
+                                 total_rating["total_recommendation_index"])
+
         insert_prediction(
             snapshot_date=target_date,
             row={
@@ -220,9 +271,9 @@ def run_prediction(target_date: str | None = None) -> None:
                 "spread_prob": spread_prob,
                 "total_pick": total_pick,
                 "total_prob": total_prob,
-                "confidence_score": ratings["confidence_score"],
-                "star_rating": ratings["star_rating"],
-                "recommendation_index": ratings["recommendation_index"],
+                "confidence_score": round(overall_confidence, 4),
+                "star_rating": overall_stars,
+                "recommendation_index": recommendation_idx,
                 "expected_home_score": sim["expected_home_score"],
                 "expected_visitor_score": sim["expected_visitor_score"],
                 "simulation_variance": sim["score_distribution_variance"],
@@ -232,7 +283,8 @@ def run_prediction(target_date: str | None = None) -> None:
                 "live_total": live_total,
                 "simulation_runs": sim_count,
                 "odds_source": odds_source,
-                "details": {"simulation": sim, "market": market},
+                "details": {"simulation": sim, "market": market,
+                            "spread_rating": spread_rating, "total_rating": total_rating},
             },
         )
         saved_count += 1

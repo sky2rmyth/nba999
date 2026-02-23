@@ -38,8 +38,8 @@ def run_review(target_date: str | None = None) -> None:
     for r in rows:
         margin = r["final_home_score"] - r["final_visitor_score"]
         total = r["final_home_score"] + r["final_visitor_score"]
-        spread_correct = (r["spread_pick"].endswith("让分") and margin + (r["live_spread"] or 0) > 0) or (
-            r["spread_pick"].endswith("受让") and margin + (r["live_spread"] or 0) <= 0
+        spread_correct = ("受让" not in r["spread_pick"] and margin + (r["live_spread"] or 0) > 0) or (
+            "受让" in r["spread_pick"] and margin + (r["live_spread"] or 0) <= 0
         )
         total_correct = (r["total_pick"] == "大分" and r["live_total"] is not None and total > r["live_total"]) or (
             r["total_pick"] == "小分" and r["live_total"] is not None and total <= r["live_total"]

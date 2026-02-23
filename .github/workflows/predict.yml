@@ -27,8 +27,8 @@ jobs:
         working-directory: nba-quant-system
       - name: Validate models exist
         run: |
-          test -f models/spread_model.pkl || { echo "ERROR: spread model missing"; exit 1; }
-          test -f models/total_model.pkl || { echo "ERROR: total model missing"; exit 1; }
+          test -f models/home_score_model.pkl || { echo "ERROR: home score model missing"; exit 1; }
+          test -f models/away_score_model.pkl || { echo "ERROR: away score model missing"; exit 1; }
           echo "Models validated successfully"
         working-directory: nba-quant-system
       - name: Validate predictions saved

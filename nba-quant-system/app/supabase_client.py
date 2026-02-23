@@ -6,7 +6,6 @@ If credentials are not set, calls are skipped (SQLite acts as local cache).
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -56,36 +55,24 @@ def _ensure_tables() -> None:
 
 
 def save_prediction(row: dict[str, Any]) -> None:
-    """Persist a prediction row to Supabase.  Raises on failure."""
+    """Persist a prediction row to Supabase.
+
+    All prediction data is stored inside a single ``payload`` JSONB column.
+    Errors are caught so the prediction pipeline never crashes if logging fails.
+    """
     client = _get_client()
     if client is None:
         return
-    record = {
-        "game_id": row.get("game_id"),
-        "game_date": row.get("game_date"),
-        "home_team": row.get("home_team"),
-        "away_team": row.get("away_team"),
-        "spread_line": row.get("spread_line"),
-        "total_line": row.get("total_line"),
-        "spread_pick": row.get("spread_pick"),
-        "total_pick": row.get("total_pick"),
-        "spread_confidence": row.get("spread_confidence"),
-        "total_confidence": row.get("total_confidence"),
-        "model_version": row.get("model_version", "v1"),
-        "simulation_runs": row.get("simulation_runs", 10000),
-        "spread_edge": row.get("spread_edge", 0.0),
-        "total_edge": row.get("total_edge", 0.0),
-        "expected_home_score": row.get("expected_home_score"),
-        "expected_visitor_score": row.get("expected_visitor_score"),
-        "confidence_score": row.get("confidence_score"),
-        "star_rating": row.get("star_rating"),
-        "odds_source": row.get("odds_source"),
-        "feature_count": row.get("feature_count", 0),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "details_json": json.dumps(row.get("details", {}), ensure_ascii=False),
-    }
-    client.table("predictions").insert(record).execute()
-    logger.info("Supabase: prediction saved for game %s", row.get("game_id"))
+    record = dict(row)
+    record.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    try:
+        client.table("predictions").insert({
+            "game_id": record["game_id"],
+            "payload": record,
+        }).execute()
+        logger.info("Supabase: prediction saved for game %s", row.get("game_id"))
+    except Exception:
+        logger.exception("Supabase: failed to save prediction — continuing")
 
 
 def save_simulation_log(row: dict[str, Any]) -> None:

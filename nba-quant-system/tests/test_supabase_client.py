@@ -67,18 +67,17 @@ def test_save_prediction_skips_when_not_configured():
     supabase_client.save_prediction({"game_id": 1})  # should not raise
 
 
-def test_save_prediction_raises_on_failure():
-    """save_prediction raises when Supabase insert fails."""
+def test_save_prediction_does_not_raise_on_failure():
+    """save_prediction swallows exceptions so the pipeline never crashes."""
     fake_client = mock.MagicMock()
     fake_client.table.return_value.insert.return_value.execute.side_effect = RuntimeError("write failed")
     supabase_client._client = fake_client
     supabase_client._available = True
-    with pytest.raises(RuntimeError, match="write failed"):
-        supabase_client.save_prediction({"game_id": 1})
+    supabase_client.save_prediction({"game_id": 1})  # should not raise
 
 
-def test_save_prediction_includes_required_fields():
-    """save_prediction record contains all required fields from the issue."""
+def test_save_prediction_uses_payload_jsonb():
+    """save_prediction stores all data inside game_id + payload JSONB."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
@@ -100,14 +99,18 @@ def test_save_prediction_includes_required_fields():
 
     inserted = fake_client.table.return_value.insert.call_args[0][0]
     assert inserted["game_id"] == 42
-    assert inserted["game_date"] == "2025-01-15"
-    assert inserted["spread_line"] == -3.5
-    assert inserted["total_line"] == 220.5
-    assert inserted["spread_confidence"] == 65.0
-    assert inserted["total_confidence"] == 58.0
-    assert inserted["model_version"] == "v2"
-    assert inserted["simulation_runs"] == 10000
-    assert "created_at" in inserted
+    assert "payload" in inserted
+    assert len(inserted) == 2  # only 'game_id' and 'payload' at top level
+    payload = inserted["payload"]
+    assert payload["game_id"] == 42
+    assert payload["game_date"] == "2025-01-15"
+    assert payload["spread_line"] == -3.5
+    assert payload["total_line"] == 220.5
+    assert payload["spread_confidence"] == 65.0
+    assert payload["total_confidence"] == 58.0
+    assert payload["model_version"] == "v2"
+    assert payload["simulation_runs"] == 10000
+    assert "created_at" in payload
 
 
 # --- save_simulation_log ---

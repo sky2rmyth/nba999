@@ -54,11 +54,13 @@ def run_prediction(target_date: str | None = None) -> None:
     bootstrap_historical_data()
 
     # --- Step 2: Ensure models (auto-train on first run) ---
+    models_existed_before = _verify_models_present()
     model_bundle = ensure_models()
     if not _verify_models_present():
         logger.error("Models missing after ensure_models — aborting")
         sys.exit(1)
     logger.info("Models present: YES")
+    training_executed = not models_existed_before
 
     # --- Step 3: Fetch today's games ---
     client = BallDontLieClient()
@@ -66,7 +68,6 @@ def run_prediction(target_date: str | None = None) -> None:
 
     lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
-    training_done = _verify_models_present()
 
     for g in games:
         game_id = g["id"]
@@ -177,7 +178,7 @@ def run_prediction(target_date: str | None = None) -> None:
     # --- Step 8: Database validation summary ---
     logger.info("Saved predictions: %d games", saved_count)
     logger.info("Models present: YES")
-    logger.info("Training executed: %s", "YES" if training_done else "NO")
+    logger.info("Training executed: %s", "YES" if training_executed else "NO")
 
     # --- Step 9: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
     send_message("\n".join(lines))

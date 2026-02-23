@@ -32,15 +32,17 @@ jobs:
       - name: Validate predictions saved
         run: |
           python -c "
-          import sqlite3, sys
+          from app.database import get_conn, init_db
           from datetime import datetime
+          import sys
+          init_db()
           today = datetime.utcnow().strftime('%Y-%m-%d')
-          conn = sqlite3.connect('data/database.sqlite')
-          count = conn.execute('SELECT COUNT(*) FROM predictions_snapshot WHERE snapshot_date=?', (today,)).fetchone()[0]
-          print(f'Predictions saved for {today}: {count}')
+          with get_conn() as conn:
+              count = conn.execute('SELECT COUNT(*) FROM predictions_snapshot WHERE snapshot_date=?', (today,)).fetchone()[0]
+          print(f'预测已保存 {today}: {count}')
           if count == 0:
-              print('ERROR: No predictions saved for today')
+              print('错误: 今日无预测保存')
               sys.exit(1)
-          print('Predictions validated successfully')
+          print('预测验证成功')
           "
         working-directory: nba-quant-system

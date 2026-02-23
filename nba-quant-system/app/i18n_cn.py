@@ -8,7 +8,7 @@ from __future__ import annotations
 _STRINGS: dict[str, str] = {
     # --- retrain_engine ---
     "model_cached": "📦 模型来源: 使用本地缓存模型",
-    "model_loaded": "📦 模型来源: 已加载历史学习成果",
+    "model_loaded": "🧠 模型来源：Supabase已加载",
     "model_trained": "📦 模型来源: 训练新模型",
     "training_start": "🧠 系统正在学习历史比赛数据",
     "training_done": "✅ 学习完成",
@@ -35,14 +35,23 @@ _STRINGS: dict[str, str] = {
     # --- model_status ---
     "model_status_report": (
         "📈 模型状态报告\n\n"
-        "版本: {version}\n"
-        "模型可用: {available}\n"
-        "训练样本: {training_samples}\n"
-        "MAE: {mae_display}\n"
-        "让分覆盖准确率: {sc_acc}\n"
-        "大小分准确率: {to_acc}\n"
-        "最后训练: {last_trained}"
+        "版本：{version}\n"
+        "模型状态：{available}\n"
+        "训练样本：{training_samples}\n"
+        "平均误差：{mae_display}\n"
+        "让分准确率：{sc_acc}\n"
+        "大小分准确率：{to_acc}\n"
+        "最后训练时间：{last_trained}"
     ),
+
+    # --- review_engine ---
+    "review_no_games": (
+        "📊 复盘系统\n"
+        "⚠️ 当前没有可复盘比赛\n"
+        "比赛尚未结束或结果未更新"
+    ),
+    "review_header": "📊 昨日战绩｜{target_date}",
+    "review_rolling": "📈 近30天滚动表现",
 }
 
 

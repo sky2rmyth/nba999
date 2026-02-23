@@ -16,7 +16,10 @@ from .game_simulator import run_possession_simulation
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
-from .rating_engine import compute_spread_rating, compute_total_rating
+from .rating_engine import (
+    compute_spread_rating, compute_total_rating,
+    compute_edge_score, compute_ev, compute_kelly_stake, stars_display,
+)
 from .retrain_engine import ensure_models
 from .team_translation import zh_name
 from .telegram_bot import send_message, ProgressTracker
@@ -115,9 +118,10 @@ def run_prediction(target_date: str | None = None) -> None:
     # --- Monte Carlo phase ---
     progress.advance(3)
 
-    lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
+    lines = [f"🏀 NBA量化预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
     odds_valid_count = 0
+    telegram_count = 0
 
     for idx, g in enumerate(games):
         game_id = g["id"]
@@ -282,22 +286,15 @@ def run_prediction(target_date: str | None = None) -> None:
         spread_stars = spread_rating["spread_stars"]
         total_stars = total_rating["total_stars"]
 
-        # --- Telegram format (Part 8) ---
-        lines.extend([
-            f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
-            "",
-            "让分：",
-            f"主队 {zh_name(home['full_name'])} {live_spread:+.1f}",
-            f"推荐：{spread_pick}",
-            f"信心：{spread_confidence:.0f}%",
-            "",
-            "大小：",
-            f"{live_total:.1f}",
-            f"推荐：{total_pick}",
-            f"信心：{total_confidence:.0f}%",
-            "",
-            "━━━━━━━━━━━━━━━━",
-        ])
+        # --- Edge scoring, EV, CLV projection, Kelly ---
+        overall_edge_raw = max(abs(spread_edge), abs(total_edge)) * 100.0
+        edge_score = compute_edge_score(
+            max(combined_spread_prob, combined_total_prob)
+        )
+        best_prob = max(combined_spread_prob, combined_total_prob)
+        ev_value = compute_ev(best_prob)
+        clv_projection = round((live_spread - opening_spread) if opening_spread and live_spread else 0.0, 2)
+        kelly = compute_kelly_stake(best_prob)
 
         # --- Step 6: Save prediction to database ---
         spread_prob = combined_spread_prob
@@ -332,6 +329,12 @@ def run_prediction(target_date: str | None = None) -> None:
             "feature_count": feature_count,
             "spread_edge": round(spread_edge, 4),
             "total_edge": round(total_edge, 4),
+            "edge_score": edge_score,
+            "ev_value": ev_value,
+            "clv_projection": clv_projection,
+            "recommended_stake": kelly["recommended_stake"],
+            "bankroll_after_bet": kelly["bankroll_after_bet"],
+            "home_win_probability": sim.get("home_win_probability", 0.0),
             "details": {"simulation": sim, "market": market,
                         "spread_rating": spread_rating, "total_rating": total_rating},
         }
@@ -355,6 +358,31 @@ def run_prediction(target_date: str | None = None) -> None:
             "simulation_runs": sim_count,
             **sim,
         })
+
+        # --- Game filter: only send to Telegram if edge/EV/confidence pass ---
+        best_confidence = max(spread_confidence, total_confidence)
+        if edge_score >= 8 and ev_value > 0 and best_confidence >= 55:
+            if abs(spread_edge) >= abs(total_edge):
+                recommend_dir = spread_pick
+            else:
+                recommend_dir = total_pick
+            lines.extend([
+                f"🏀 {zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",
+                f"推荐方向：{recommend_dir}",
+                f"概率：{best_prob:.1%}",
+                f"Edge评分：{edge_score:.1f}",
+                f"EV：{ev_value:+.4f}",
+                f"星级：{stars_display(overall_stars)}",
+                f"建议投注比例：{kelly['recommended_stake']:.0f}",
+                "",
+                f"胜负概率：主队 {sim.get('home_win_probability', 0):.1%}",
+                f"让分覆盖概率：{combined_spread_prob:.1%}",
+                f"大小分概率：大 {combined_total_prob:.1%}",
+                f"期望比分：{sim['expected_home_score']:.1f} - {sim['expected_visitor_score']:.1f}",
+                "",
+                "━━━━━━━━━━━━━━━━",
+            ])
+            telegram_count += 1
 
     # --- Saving phase ---
     progress.advance(4)

@@ -26,7 +26,7 @@ def _reset_supabase():
 
 def test_cn_returns_plain_string():
     """cn() returns a plain string for a known key with no formatting."""
-    assert cn("model_loaded") == "📦 模型来源: 已加载历史学习成果"
+    assert cn("model_loaded") == "🧠 模型来源：Supabase已加载"
 
 
 def test_cn_returns_formatted_string():

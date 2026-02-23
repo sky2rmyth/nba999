@@ -161,6 +161,27 @@ def fetch_latest_training_metrics() -> dict[str, Any] | None:
     return None
 
 
+def fetch_predictions_for_date(game_date: str) -> list[dict[str, Any]]:
+    """Fetch predictions for a given date from Supabase.
+
+    Returns a list of prediction payload dicts or an empty list.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = client.table("predictions").select("payload").execute()
+        results = []
+        for row in resp.data or []:
+            payload = row.get("payload") or {}
+            if payload.get("game_date") == game_date and payload.get("is_final_prediction"):
+                results.append(payload)
+        return results
+    except Exception:
+        logger.debug("Supabase: could not fetch predictions for %s", game_date)
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Supabase Storage helpers for persistent model files
 # ---------------------------------------------------------------------------

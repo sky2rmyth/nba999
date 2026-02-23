@@ -199,7 +199,7 @@ def upload_models_to_storage(model_dir: str | os.PathLike) -> bool:
             try:
                 client.storage.from_(_STORAGE_BUCKET).remove([filename])
             except Exception:
-                pass
+                logger.debug("Supabase Storage: could not remove existing %s", filename)
             client.storage.from_(_STORAGE_BUCKET).upload(filename, data)
             logger.info("Supabase Storage: uploaded %s", filename)
         except Exception:

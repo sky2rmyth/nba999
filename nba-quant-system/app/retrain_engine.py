@@ -97,7 +97,7 @@ def ensure_models(force: bool = False):
                     _try_send_telegram("📦 Models restored from storage")
                     return restored
         except Exception:
-            logger.debug("Supabase Storage restore skipped", exc_info=True)
+            logger.debug("Supabase Storage restore failed", exc_info=True)
     if should_retrain(force=force):
         if first_run:
             logger.info("FIRST RUN TRAINING STARTED")

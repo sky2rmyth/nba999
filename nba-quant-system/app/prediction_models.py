@@ -204,7 +204,7 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
         if upload_models_to_storage(MODEL_DIR):
             logger.info("Models uploaded to Supabase Storage")
     except Exception:
-        logger.debug("Supabase Storage upload skipped")
+        logger.debug("Supabase Storage upload failed", exc_info=True)
 
     bundle = ModelBundle(home_model, away_model, alg,
                          spread_cover_model=spread_cover_model,

@@ -12,6 +12,7 @@ from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games
 from .feature_engineering import FEATURE_COLUMNS
 from .game_simulator import run_possession_simulation
+from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR
 from .rating_engine import compute_ratings
@@ -46,6 +47,19 @@ def _verify_models_present() -> bool:
     return sp.exists() and tp.exists()
 
 
+def _match_primary_odds(primary_odds: list, home_name: str, visitor_name: str) -> dict | None:
+    """Match a game to primary odds data by team names."""
+    for event in primary_odds:
+        event_home = event.get("home_team", "")
+        event_away = event.get("away_team", "")
+        if (home_name and event_home and
+            (home_name.lower() in event_home.lower() or event_home.lower() in home_name.lower())) and \
+           (visitor_name and event_away and
+            (visitor_name.lower() in event_away.lower() or event_away.lower() in visitor_name.lower())):
+            return event
+    return None
+
+
 def run_prediction(target_date: str | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     target_date = target_date or datetime.utcnow().strftime("%Y-%m-%d")
@@ -66,6 +80,9 @@ def run_prediction(target_date: str | None = None) -> None:
     client = BallDontLieClient()
     games = sync_date_games(target_date)
 
+    # --- Step 3b: Fetch primary odds (the-odds-api) ---
+    primary_odds = fetch_today_odds()
+
     lines = [f"🏀 NBA每日预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
     odds_valid_count = 0
@@ -75,25 +92,51 @@ def run_prediction(target_date: str | None = None) -> None:
         home = g["home_team"]
         vis = g["visitor_team"]
 
-        # --- Debug odds API ---
-        try:
-            odds_data = client.betting_odds(game_ids=game_id, per_page=100)
-            logger.info("Odds API debug | game_id=%s | provider_count=%d | response_length=%d",
-                        game_id, len(odds_data), len(str(odds_data)))
-            opening_payload = {"data": odds_data}
-            live_payload = {"data": odds_data}
-        except Exception:
-            logger.warning("betting_odds unavailable for game %s – odds marked missing", game_id, exc_info=True)
-            opening_payload = {"data": []}
-            live_payload = {"data": []}
+        opening_spread = None
+        live_spread = None
+        opening_total = None
+        live_total = None
+        odds_source = "NONE"
 
-        store_opening_and_live(game_id, opening_payload, live_payload)
-        opening_spread, opening_total, _ = parse_main_market(opening_payload)
-        live_spread, live_total, _ = parse_main_market(live_payload)
+        # --- PRIMARY: the-odds-api.com ---
+        matched_event = _match_primary_odds(
+            primary_odds, home.get("full_name", ""), vis.get("full_name", "")
+        )
+        if matched_event:
+            opening = extract_opening_line(matched_event)
+            live = extract_live_line(matched_event)
+            if opening.get("home_spread") is not None and opening.get("total_points") is not None:
+                opening_spread = float(opening["home_spread"])
+                opening_total = float(opening["total_points"])
+                live_spread = float(live["home_spread"]) if live.get("home_spread") is not None else opening_spread
+                live_total = float(live["total_points"]) if live.get("total_points") is not None else opening_total
+                odds_source = "PRIMARY"
+                logger.info("Odds Source: PRIMARY (game %s)", game_id)
 
-        # --- Validate odds existence (no fallback values) ---
-        if opening_spread is None or opening_total is None:
-            logger.warning("Odds missing for game %s – skipping prediction", game_id)
+        # --- FALLBACK: balldontlie betting_odds ---
+        if odds_source == "NONE":
+            try:
+                odds_data = client.betting_odds(game_ids=game_id, per_page=100)
+                logger.info("Odds API debug | game_id=%s | provider_count=%d | response_length=%d",
+                            game_id, len(odds_data), len(str(odds_data)))
+                opening_payload = {"data": odds_data}
+                live_payload = {"data": odds_data}
+                store_opening_and_live(game_id, opening_payload, live_payload)
+                o_spread, o_total, _ = parse_main_market(opening_payload)
+                l_spread, l_total, _ = parse_main_market(live_payload)
+                if o_spread is not None and o_total is not None:
+                    opening_spread = o_spread
+                    opening_total = o_total
+                    live_spread = l_spread if l_spread is not None else o_spread
+                    live_total = l_total if l_total is not None else o_total
+                    odds_source = "BALLDONTLIE"
+                    logger.info("Odds Source: BALLDONTLIE (game %s)", game_id)
+            except Exception:
+                logger.warning("betting_odds unavailable for game %s", game_id, exc_info=True)
+
+        # --- BOTH FAILED: skip prediction ---
+        if odds_source == "NONE":
+            logger.warning("Odds Source: NONE (game %s) – skipping prediction", game_id)
             lines.extend(
                 [
                     f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
@@ -105,8 +148,6 @@ def run_prediction(target_date: str | None = None) -> None:
             continue
 
         odds_valid_count += 1
-        live_spread = live_spread if live_spread is not None else opening_spread
-        live_total = live_total if live_total is not None else opening_total
 
         logger.info("Loaded odds for game %s", game_id)
         logger.info("  Opening Spread: %s", opening_spread)
@@ -147,7 +188,7 @@ def run_prediction(target_date: str | None = None) -> None:
         if sim_count < MIN_SIMULATION_COUNT:
             logger.error("Simulation count %d < %d for game %s — aborting", sim_count, MIN_SIMULATION_COUNT, game_id)
             sys.exit(1)
-        logger.info("Simulation verified: %d+ runs per game (game_id=%s)", sim_count, game_id)
+        logger.info("Simulation runs: %d (game_id=%s)", sim_count, game_id)
 
         spread_edge = sim["spread_cover_probability"] - 0.5
         total_edge = sim["over_probability"] - 0.5
@@ -189,6 +230,8 @@ def run_prediction(target_date: str | None = None) -> None:
                 "live_spread": live_spread,
                 "opening_total": opening_total,
                 "live_total": live_total,
+                "simulation_runs": sim_count,
+                "odds_source": odds_source,
                 "details": {"simulation": sim, "market": market},
             },
         )
@@ -196,7 +239,7 @@ def run_prediction(target_date: str | None = None) -> None:
 
     # --- Step 7: Fail if no games have valid odds ---
     if games and odds_valid_count == 0:
-        raise RuntimeError("No betting odds returned from balldontlie API")
+        raise RuntimeError("No betting odds returned from any provider")
 
     # --- Step 8: Verify predictions were saved ---
     if games and saved_count == 0:
@@ -204,7 +247,7 @@ def run_prediction(target_date: str | None = None) -> None:
         sys.exit(1)
 
     # --- Step 9: Database validation summary ---
-    logger.info("Saved predictions: %d games", saved_count)
+    logger.info("Saved predictions: %d", saved_count)
     logger.info("Models present: YES")
     logger.info("Training executed: %s", "YES" if training_executed else "NO")
 

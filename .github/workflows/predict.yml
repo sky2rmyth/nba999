@@ -19,6 +19,7 @@ jobs:
         working-directory: nba-quant-system
       - name: Run prediction
         env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

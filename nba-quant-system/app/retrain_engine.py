@@ -122,6 +122,20 @@ def ensure_models(force: bool = False):
         )
         _try_send_telegram(report)
 
+        # --- Log training to Supabase ---
+        from .supabase_client import save_training_log
+        save_training_log({
+            "model_version": bundle.version,
+            "feature_count": feature_count,
+            "algorithm": bundle.algorithm,
+            "data_points": sample_count,
+            "home_mae": bundle.metrics.get("home_mae"),
+            "home_rmse": bundle.metrics.get("home_rmse"),
+            "away_mae": bundle.metrics.get("away_mae"),
+            "away_rmse": bundle.metrics.get("away_rmse"),
+            "training_seconds": duration,
+        })
+
         logger.info("Training executed: YES | Algorithm: %s | Version: %s", bundle.algorithm, bundle.version)
         return bundle
     bundle = load_models()

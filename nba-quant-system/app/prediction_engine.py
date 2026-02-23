@@ -336,18 +336,22 @@ def run_prediction(target_date: str | None = None) -> None:
         insert_prediction(snapshot_date=target_date, row=prediction_row)
         saved_count += 1
 
-        # --- Supabase persistence ---
-        try:
-            from .supabase_client import save_prediction, save_simulation_log
-            save_prediction(prediction_row)
-            save_simulation_log({
-                "game_id": game_id,
-                "model_version": model_bundle.version,
-                "simulation_runs": sim_count,
-                **sim,
-            })
-        except Exception:
-            logger.debug("Supabase save skipped")
+        # --- Supabase persistence (mandatory when configured) ---
+        from .supabase_client import save_prediction, save_simulation_log
+        save_prediction({
+            **prediction_row,
+            "game_date": target_date,
+            "spread_line": live_spread,
+            "total_line": live_total,
+            "spread_confidence": spread_confidence,
+            "total_confidence": total_confidence,
+        })
+        save_simulation_log({
+            "game_id": game_id,
+            "model_version": model_bundle.version,
+            "simulation_runs": sim_count,
+            **sim,
+        })
 
     # --- Saving phase ---
     progress.advance(4)  # 💾 Saving Results

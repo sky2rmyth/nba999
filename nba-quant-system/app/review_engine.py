@@ -76,6 +76,8 @@ def run_review(target_date: str | None = None) -> None:
     clv_live = 0.0
     stake = max(len(rows), 1)
 
+    from .supabase_client import save_review_result
+
     for r in rows:
         margin = r["final_home_score"] - r["final_visitor_score"]
         total = r["final_home_score"] + r["final_visitor_score"]
@@ -85,6 +87,20 @@ def run_review(target_date: str | None = None) -> None:
         total_hits += int(total_correct)
         clv_open += abs((r["opening_spread"] or 0) - (r["live_spread"] or 0))
         clv_live += abs((r["live_spread"] or 0) - margin)
+
+        # --- Save review result to Supabase ---
+        save_review_result({
+            "game_id": r["game_id"],
+            "game_date": target_date,
+            "home_team": r["home_team"],
+            "away_team": r["away_team"],
+            "spread_pick": r["spread_pick"],
+            "total_pick": r["total_pick"],
+            "spread_correct": bool(spread_correct),
+            "total_correct": bool(total_correct),
+            "final_home_score": r["final_home_score"],
+            "final_visitor_score": r["final_visitor_score"],
+        })
 
     spread_rate = spread_hits / stake
     total_rate = total_hits / stake

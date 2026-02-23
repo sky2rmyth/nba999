@@ -22,7 +22,7 @@ def run_possession_simulation(
     home_scores = rng.normal(predicted_home_score, home_std, n_sim)
     away_scores = rng.normal(predicted_away_score, away_std, n_sim)
 
-    # Clip to reasonable score ranges
+    # Clip to reasonable NBA score ranges (historical min ~60, max ~160)
     home_scores = np.clip(home_scores, 70, 170)
     away_scores = np.clip(away_scores, 70, 170)
 

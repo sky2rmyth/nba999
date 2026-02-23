@@ -26,25 +26,19 @@ class ModelBundle:
 
 
 def _build_regressor():
+    lgbm_params = dict(
+        n_estimators=300, learning_rate=0.05, max_depth=8,
+        num_leaves=63, subsample=0.8, colsample_bytree=0.8,
+        random_state=42, verbose=-1,
+    )
     try:
         from lightgbm import LGBMRegressor  # type: ignore
 
-        return "lightgbm", LGBMRegressor(
-            n_estimators=300, learning_rate=0.05, max_depth=8,
-            num_leaves=63, subsample=0.8, colsample_bytree=0.8,
-            random_state=42, verbose=-1,
-        ), LGBMRegressor(
-            n_estimators=300, learning_rate=0.05, max_depth=8,
-            num_leaves=63, subsample=0.8, colsample_bytree=0.8,
-            random_state=42, verbose=-1,
-        )
+        return "lightgbm", LGBMRegressor(**lgbm_params), LGBMRegressor(**lgbm_params)
     except Exception:
         from sklearn.ensemble import GradientBoostingRegressor
-        return "gradient_boosting", GradientBoostingRegressor(
-            n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42,
-        ), GradientBoostingRegressor(
-            n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42,
-        )
+        gb_params = dict(n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42)
+        return "gradient_boosting", GradientBoostingRegressor(**gb_params), GradientBoostingRegressor(**gb_params)
 
 
 def train_models(df: pd.DataFrame) -> ModelBundle:

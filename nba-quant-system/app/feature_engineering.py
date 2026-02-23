@@ -59,6 +59,15 @@ def build_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
     )
 
     df = games.merge(odds, on="game_id", how="left")
+
+    # Compute average total across all completed games for default odds
+    valid_totals = games.loc[
+        games["home_score"].notna() & games["visitor_score"].notna(),
+    ]
+    avg_total = float(
+        (valid_totals["home_score"] + valid_totals["visitor_score"]).mean()
+    ) if not valid_totals.empty else 215.0
+
     rows = []
     for r in df.to_dict("records"):
         hrm = _recent_margin(conn, int(r["home_team_id"]), str(r["date"]))
@@ -68,7 +77,8 @@ def build_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
         o_spread = r.get("opening_spread")
         o_total = r.get("opening_total")
         if not pd.notna(o_spread) or not pd.notna(o_total):
-            continue
+            o_spread = 0.0
+            o_total = avg_total
         rows.append(
             {
                 "game_id": r["game_id"],

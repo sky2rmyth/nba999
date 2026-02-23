@@ -115,14 +115,50 @@ def test_save_prediction_uses_payload_jsonb():
 
 # --- save_simulation_log ---
 
-def test_save_simulation_log_raises_on_failure():
-    """save_simulation_log raises when Supabase insert fails."""
+def test_save_simulation_log_does_not_raise_on_failure():
+    """save_simulation_log swallows exceptions so the pipeline never crashes."""
     fake_client = mock.MagicMock()
     fake_client.table.return_value.insert.return_value.execute.side_effect = RuntimeError("fail")
     supabase_client._client = fake_client
     supabase_client._available = True
-    with pytest.raises(RuntimeError):
-        supabase_client.save_simulation_log({"game_id": 1})
+    supabase_client.save_simulation_log({"game_id": 1})  # should not raise
+
+
+def test_save_simulation_log_skips_when_not_configured():
+    """save_simulation_log is a no-op without credentials."""
+    supabase_client._available = False
+    supabase_client.save_simulation_log({"game_id": 1})  # should not raise
+
+
+def test_save_simulation_log_uses_payload_jsonb():
+    """save_simulation_log stores all data inside game_id + payload JSONB."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    supabase_client.save_simulation_log({
+        "game_id": 42,
+        "model_version": "v2",
+        "simulation_runs": 10000,
+        "spread_cover_probability": 0.65,
+        "over_probability": 0.58,
+        "expected_home_score": 112.5,
+        "expected_visitor_score": 108.3,
+    })
+
+    inserted = fake_client.table.return_value.insert.call_args[0][0]
+    assert inserted["game_id"] == 42
+    assert "payload" in inserted
+    assert len(inserted) == 2  # only 'game_id' and 'payload' at top level
+    payload = inserted["payload"]
+    assert payload["game_id"] == 42
+    assert payload["model_version"] == "v2"
+    assert payload["simulation_runs"] == 10000
+    assert payload["spread_cover_probability"] == 0.65
+    assert payload["over_probability"] == 0.58
+    assert payload["expected_home_score"] == 112.5
+    assert payload["expected_visitor_score"] == 108.3
+    assert "timestamp" in payload
 
 
 # --- save_training_log ---

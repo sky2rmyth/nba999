@@ -76,22 +76,24 @@ def save_prediction(row: dict[str, Any]) -> None:
 
 
 def save_simulation_log(row: dict[str, Any]) -> None:
-    """Persist a simulation log to Supabase.  Raises on failure."""
+    """Persist a simulation log to Supabase.
+
+    All data is stored inside ``game_id`` + ``payload`` JSONB columns.
+    Errors are caught so the prediction pipeline never crashes if logging fails.
+    """
     client = _get_client()
     if client is None:
         return
-    record = {
-        "game_id": row.get("game_id"),
-        "model_version": row.get("model_version", "v1"),
-        "simulation_runs": row.get("simulation_runs", 10000),
-        "spread_cover_probability": row.get("spread_cover_probability"),
-        "over_probability": row.get("over_probability"),
-        "expected_home_score": row.get("expected_home_score"),
-        "expected_visitor_score": row.get("expected_visitor_score"),
-        "score_distribution_variance": row.get("score_distribution_variance"),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    client.table("simulation_logs").insert(record).execute()
+    record = dict(row)
+    record.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    try:
+        client.table("simulation_logs").insert({
+            "game_id": record["game_id"],
+            "payload": record,
+        }).execute()
+        logger.info("Supabase: simulation log saved for game %s", row.get("game_id"))
+    except Exception:
+        logger.exception("Supabase: failed to save simulation log — continuing")
 
 
 def save_training_log(row: dict[str, Any]) -> None:

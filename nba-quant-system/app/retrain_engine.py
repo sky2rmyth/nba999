@@ -5,7 +5,7 @@ import logging
 from .data_pipeline import bootstrap_historical_data
 from .database import get_conn, init_db
 from .feature_engineering import FEATURE_COLUMNS, build_training_frame
-from .prediction_models import load_models, train_models, _current_version
+from .prediction_models import load_models, train_models, _current_version, MODEL_DIR
 from .rating_engine import is_spread_correct, is_total_correct
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,6 @@ def ensure_models(force: bool = False):
     if cached is None:
         try:
             from .supabase_client import download_models_from_storage
-            from .prediction_models import MODEL_DIR
             if download_models_from_storage(MODEL_DIR):
                 restored = load_models()
                 if restored is not None:
@@ -157,6 +156,13 @@ def ensure_models(force: bool = False):
         "away_rmse": bundle.metrics.get("away_rmse"),
         "training_seconds": duration,
     })
+
+    # --- Upload models to Supabase Storage ---
+    from .supabase_client import upload_models_to_storage
+    logger.info("Uploading models to Supabase Storage...")
+    if not upload_models_to_storage(MODEL_DIR):
+        raise RuntimeError("Failed to upload models to Supabase Storage")
+    logger.info("Models upload complete")
 
     logger.info("MODEL SOURCE: Trained new model | Algorithm: %s | Version: %s", bundle.algorithm, bundle.version)
     _try_send_telegram("📦 MODEL SOURCE: Trained new model")

@@ -198,6 +198,14 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
     except Exception:
         logger.debug("Supabase training log skipped")
 
+    # Upload models to Supabase Storage for persistence across runs
+    try:
+        from .supabase_client import upload_models_to_storage
+        if upload_models_to_storage(MODEL_DIR):
+            logger.info("Models uploaded to Supabase Storage")
+    except Exception:
+        logger.debug("Supabase Storage upload skipped")
+
     bundle = ModelBundle(home_model, away_model, alg,
                          spread_cover_model=spread_cover_model,
                          total_model=total_model)

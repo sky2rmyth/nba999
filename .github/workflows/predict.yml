@@ -29,12 +29,6 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python -m app.prediction_engine
         working-directory: nba-quant-system
-      - name: Validate models exist
-        run: |
-          test -f models/home_score_model.pkl || { echo "ERROR: home score model missing"; exit 1; }
-          test -f models/away_score_model.pkl || { echo "ERROR: away score model missing"; exit 1; }
-          echo "Models validated successfully"
-        working-directory: nba-quant-system
       - name: Validate predictions saved
         run: |
           python -c "

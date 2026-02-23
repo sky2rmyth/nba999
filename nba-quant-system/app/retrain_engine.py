@@ -85,6 +85,19 @@ def should_retrain(force: bool = False) -> bool:
 
 def ensure_models(force: bool = False):
     first_run = load_models() is None
+    # If models are missing locally, try restoring from Supabase Storage
+    if first_run:
+        try:
+            from .supabase_client import download_models_from_storage
+            from .prediction_models import MODEL_DIR
+            if download_models_from_storage(MODEL_DIR):
+                restored = load_models()
+                if restored is not None:
+                    logger.info("Models restored from Supabase Storage | Version: %s", restored.version)
+                    _try_send_telegram("📦 Models restored from storage")
+                    return restored
+        except Exception:
+            logger.debug("Supabase Storage restore skipped", exc_info=True)
     if should_retrain(force=force):
         if first_run:
             logger.info("FIRST RUN TRAINING STARTED")

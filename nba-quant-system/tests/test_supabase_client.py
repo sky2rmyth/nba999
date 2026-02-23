@@ -246,3 +246,80 @@ def test_save_review_result_skips_when_not_configured():
     """save_review_result is a no-op without credentials."""
     supabase_client._available = False
     supabase_client.save_review_result({"game_id": 1})  # should not raise
+
+
+# --- upload_models_to_storage ---
+
+def test_upload_models_skips_when_not_configured():
+    """upload_models_to_storage returns False without credentials."""
+    supabase_client._available = False
+    assert supabase_client.upload_models_to_storage("/tmp/models") is False
+
+
+def test_upload_models_uploads_all_files(tmp_path):
+    """upload_models_to_storage uploads each model file to the bucket."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    for fname in supabase_client._MODEL_STORAGE_FILES:
+        (tmp_path / fname).write_bytes(b"fake-model-data")
+
+    result = supabase_client.upload_models_to_storage(tmp_path)
+    assert result is True
+
+    upload_calls = fake_client.storage.from_.return_value.upload.call_args_list
+    uploaded_names = [call[0][0] for call in upload_calls]
+    for fname in supabase_client._MODEL_STORAGE_FILES:
+        assert fname in uploaded_names
+
+
+def test_upload_models_handles_missing_files(tmp_path):
+    """upload_models_to_storage skips files that don't exist locally."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    # Only create one file
+    (tmp_path / "home_model.pkl").write_bytes(b"data")
+
+    result = supabase_client.upload_models_to_storage(tmp_path)
+    assert result is True
+    assert fake_client.storage.from_.return_value.upload.call_count == 1
+
+
+# --- download_models_from_storage ---
+
+def test_download_models_skips_when_not_configured():
+    """download_models_from_storage returns False without credentials."""
+    supabase_client._available = False
+    assert supabase_client.download_models_from_storage("/tmp/models") is False
+
+
+def test_download_models_downloads_all_files(tmp_path):
+    """download_models_from_storage writes files from the bucket to disk."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    fake_client.storage.from_.return_value.download.return_value = b"model-bytes"
+
+    result = supabase_client.download_models_from_storage(tmp_path)
+    assert result is True
+
+    for fname in supabase_client._MODEL_STORAGE_FILES:
+        assert (tmp_path / fname).exists()
+        assert (tmp_path / fname).read_bytes() == b"model-bytes"
+
+
+def test_download_models_returns_false_when_required_missing(tmp_path):
+    """download_models_from_storage returns False if required models fail to download."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    # All downloads fail
+    fake_client.storage.from_.return_value.download.side_effect = RuntimeError("not found")
+
+    result = supabase_client.download_models_from_storage(tmp_path)
+    assert result is False

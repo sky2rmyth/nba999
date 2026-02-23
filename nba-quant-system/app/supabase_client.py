@@ -159,3 +159,80 @@ def fetch_latest_training_metrics() -> dict[str, Any] | None:
     except Exception:
         logger.debug("Supabase: could not fetch latest training metrics")
     return None
+
+
+# ---------------------------------------------------------------------------
+# Supabase Storage helpers for persistent model files
+# ---------------------------------------------------------------------------
+
+_STORAGE_BUCKET = "models"
+_MODEL_STORAGE_FILES = (
+    "home_model.pkl",
+    "away_model.pkl",
+    "spread_model.pkl",
+    "total_model.pkl",
+    "model_version.json",
+)
+
+
+def upload_models_to_storage(model_dir: str | os.PathLike) -> bool:
+    """Upload trained model files to Supabase Storage bucket.
+
+    Returns True if all files were uploaded successfully, False otherwise.
+    """
+    from pathlib import Path
+
+    client = _get_client()
+    if client is None:
+        logger.debug("Supabase not configured — model upload skipped")
+        return False
+    model_path = Path(model_dir)
+    success = True
+    for filename in _MODEL_STORAGE_FILES:
+        filepath = model_path / filename
+        if not filepath.exists():
+            logger.warning("Model file %s not found — skipping upload", filename)
+            continue
+        try:
+            data = filepath.read_bytes()
+            # Remove existing file first (upsert)
+            try:
+                client.storage.from_(_STORAGE_BUCKET).remove([filename])
+            except Exception:
+                pass
+            client.storage.from_(_STORAGE_BUCKET).upload(filename, data)
+            logger.info("Supabase Storage: uploaded %s", filename)
+        except Exception:
+            logger.exception("Supabase Storage: failed to upload %s", filename)
+            success = False
+    return success
+
+
+def download_models_from_storage(model_dir: str | os.PathLike) -> bool:
+    """Download model files from Supabase Storage bucket.
+
+    Returns True if all required model files were downloaded, False otherwise.
+    """
+    from pathlib import Path
+
+    client = _get_client()
+    if client is None:
+        logger.debug("Supabase not configured — model download skipped")
+        return False
+    model_path = Path(model_dir)
+    model_path.mkdir(parents=True, exist_ok=True)
+    downloaded = 0
+    for filename in _MODEL_STORAGE_FILES:
+        try:
+            data = client.storage.from_(_STORAGE_BUCKET).download(filename)
+            (model_path / filename).write_bytes(data)
+            logger.info("Supabase Storage: downloaded %s", filename)
+            downloaded += 1
+        except Exception:
+            logger.warning("Supabase Storage: %s not available", filename)
+    # At minimum the two score models must be present
+    required = ("home_model.pkl", "away_model.pkl")
+    ok = all((model_path / f).exists() for f in required)
+    if ok:
+        logger.info("Supabase Storage: models restored (%d files)", downloaded)
+    return ok

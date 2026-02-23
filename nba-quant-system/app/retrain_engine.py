@@ -84,76 +84,81 @@ def should_retrain(force: bool = False) -> bool:
 
 
 def ensure_models(force: bool = False):
-    first_run = load_models() is None
-    # If models are missing locally, try restoring from Supabase Storage
-    if first_run:
+    # Step 1: If models exist locally and not forced, use cached
+    cached = load_models()
+    if cached is not None and not force:
+        logger.info("MODEL SOURCE: Using cached model | Version: %s", cached.version)
+        _try_send_telegram("📦 MODEL SOURCE: Using cached model")
+        cached.source = "Using cached model"
+        return cached
+
+    # Step 2: If models missing locally, try restoring from Supabase Storage
+    if cached is None:
         try:
             from .supabase_client import download_models_from_storage
             from .prediction_models import MODEL_DIR
             if download_models_from_storage(MODEL_DIR):
                 restored = load_models()
                 if restored is not None:
-                    logger.info("Models restored from Supabase Storage | Version: %s", restored.version)
-                    _try_send_telegram("📦 Models restored from storage")
+                    logger.info("MODEL SOURCE: Loaded from Supabase | Version: %s", restored.version)
+                    _try_send_telegram("📦 MODEL SOURCE: Loaded from Supabase")
+                    restored.source = "Loaded from Supabase"
                     return restored
         except Exception:
             logger.debug("Supabase Storage restore failed", exc_info=True)
-    if should_retrain(force=force):
-        if first_run:
-            logger.info("FIRST RUN TRAINING STARTED")
-            if not _db_has_completed_games():
-                bootstrap_historical_data()
-        logger.info("Building training dataset...")
-        _try_send_telegram("构建训练数据集...")
-        df = build_training_frame()
-        if df.empty:
-            raise RuntimeError("No historical data available for training")
 
-        feature_count = len(FEATURE_COLUMNS)
-        sample_count = len(df)
-        _try_send_telegram(f"特征数量: {feature_count}")
-        _try_send_telegram(f"训练样本数: {sample_count}")
+    # Step 3: Train new models + upload to Supabase
+    if not _db_has_completed_games():
+        logger.info("FIRST RUN TRAINING STARTED")
+        bootstrap_historical_data()
+    logger.info("Building training dataset...")
+    _try_send_telegram("构建训练数据集...")
+    df = build_training_frame()
+    if df.empty:
+        raise RuntimeError("No historical data available for training")
 
-        logger.info("Training models...")
-        bundle = train_models(df)
+    feature_count = len(FEATURE_COLUMNS)
+    sample_count = len(df)
+    _try_send_telegram(f"特征数量: {feature_count}")
+    _try_send_telegram(f"训练样本数: {sample_count}")
 
-        # Send training report to Telegram
-        duration = getattr(bundle, "duration", 0)
-        sc_acc = bundle.metrics.get("spread_cover_accuracy", 0)
-        to_acc = bundle.metrics.get("total_over_accuracy", 0)
-        report = (
-            "📊 模型训练报告\n\n"
-            f"版本: {bundle.version}\n"
-            "训练方式: Hybrid Architecture\n"
-            f"模型: LightGBM\n"
-            f"训练样本: {sample_count}\n"
-            f"特征数量: {feature_count}\n"
-            f"训练耗时: {duration:.1f} 秒\n"
-            "主队得分模型: 完成\n"
-            "客队得分模型: 完成\n"
-            f"让分覆盖模型: 完成 ({sc_acc:.1%})\n"
-            f"大小分模型: 完成 ({to_acc:.1%})"
-        )
-        _try_send_telegram(report)
+    logger.info("Training models...")
+    bundle = train_models(df)
 
-        # --- Log training to Supabase ---
-        from .supabase_client import save_training_log
-        save_training_log({
-            "model_version": bundle.version,
-            "feature_count": feature_count,
-            "algorithm": bundle.algorithm,
-            "data_points": sample_count,
-            "home_mae": bundle.metrics.get("home_mae"),
-            "home_rmse": bundle.metrics.get("home_rmse"),
-            "away_mae": bundle.metrics.get("away_mae"),
-            "away_rmse": bundle.metrics.get("away_rmse"),
-            "training_seconds": duration,
-        })
+    # Send training report to Telegram
+    duration = getattr(bundle, "duration", 0)
+    sc_acc = bundle.metrics.get("spread_cover_accuracy", 0)
+    to_acc = bundle.metrics.get("total_over_accuracy", 0)
+    report = (
+        "📊 模型训练报告\n\n"
+        f"版本: {bundle.version}\n"
+        "训练方式: Hybrid Architecture\n"
+        f"模型: LightGBM\n"
+        f"训练样本: {sample_count}\n"
+        f"特征数量: {feature_count}\n"
+        f"训练耗时: {duration:.1f} 秒\n"
+        "主队得分模型: 完成\n"
+        "客队得分模型: 完成\n"
+        f"让分覆盖模型: 完成 ({sc_acc:.1%})\n"
+        f"大小分模型: 完成 ({to_acc:.1%})"
+    )
+    _try_send_telegram(report)
 
-        logger.info("Training executed: YES | Algorithm: %s | Version: %s", bundle.algorithm, bundle.version)
-        return bundle
-    bundle = load_models()
-    if bundle is None:
-        raise RuntimeError("Model files missing")
-    logger.info("Training executed: NO | Models loaded from disk | Version: %s", bundle.version)
+    # --- Log training to Supabase ---
+    from .supabase_client import save_training_log
+    save_training_log({
+        "model_version": bundle.version,
+        "feature_count": feature_count,
+        "algorithm": bundle.algorithm,
+        "data_points": sample_count,
+        "home_mae": bundle.metrics.get("home_mae"),
+        "home_rmse": bundle.metrics.get("home_rmse"),
+        "away_mae": bundle.metrics.get("away_mae"),
+        "away_rmse": bundle.metrics.get("away_rmse"),
+        "training_seconds": duration,
+    })
+
+    logger.info("MODEL SOURCE: Trained new model | Algorithm: %s | Version: %s", bundle.algorithm, bundle.version)
+    _try_send_telegram("📦 MODEL SOURCE: Trained new model")
+    bundle.source = "Trained new model"
     return bundle

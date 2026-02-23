@@ -59,6 +59,7 @@ class ModelBundle:
         self.sample_count: int = 0
         self.feature_count: int = 0
         self.duration: float = 0.0
+        self.source: str = "unknown"
 
 
 def _build_regressor():
@@ -202,7 +203,7 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
     try:
         from .supabase_client import upload_models_to_storage
         if upload_models_to_storage(MODEL_DIR):
-            logger.info("Models uploaded to Supabase Storage")
+            logger.info("Models uploaded to Supabase Storage successfully")
     except Exception:
         logger.debug("Supabase Storage upload failed", exc_info=True)
 

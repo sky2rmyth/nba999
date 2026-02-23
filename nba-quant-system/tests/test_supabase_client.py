@@ -33,7 +33,7 @@ def test_get_client_no_credentials():
 
 
 def test_get_client_with_credentials():
-    """With env vars, _get_client initialises the Supabase client."""
+    """With env vars, _get_client initializes the Supabase client."""
     fake_client = mock.MagicMock()
     with mock.patch.dict(os.environ, {"SUPABASE_URL": "https://x.supabase.co", "SUPABASE_KEY": "key123"}):
         with mock.patch.dict(

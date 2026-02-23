@@ -124,20 +124,43 @@ def test_save_simulation_log_raises_on_failure():
 
 # --- save_training_log ---
 
-def test_save_training_log_raises_on_failure():
-    """save_training_log raises when Supabase insert fails."""
+def test_save_training_log_does_not_raise_on_failure():
+    """save_training_log swallows exceptions so the pipeline never crashes."""
     fake_client = mock.MagicMock()
     fake_client.table.return_value.insert.return_value.execute.side_effect = RuntimeError("fail")
     supabase_client._client = fake_client
     supabase_client._available = True
-    with pytest.raises(RuntimeError):
-        supabase_client.save_training_log({"model_version": "v1"})
+    supabase_client.save_training_log({"model_version": "v1"})  # should not raise
 
 
 def test_save_training_log_skips_when_not_configured():
     """save_training_log is a no-op without credentials."""
     supabase_client._available = False
     supabase_client.save_training_log({"model_version": "v1"})  # should not raise
+
+
+def test_save_training_log_uses_payload_jsonb():
+    """save_training_log stores all data inside a 'payload' JSONB column."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    supabase_client.save_training_log({
+        "model_version": "v2",
+        "feature_count": 50,
+        "algorithm": "xgboost",
+        "home_mae": 4.5,
+    })
+
+    inserted = fake_client.table.return_value.insert.call_args[0][0]
+    assert "payload" in inserted
+    assert len(inserted) == 1  # only 'payload' key at top level
+    payload = inserted["payload"]
+    assert payload["model_version"] == "v2"
+    assert payload["feature_count"] == 50
+    assert payload["algorithm"] == "xgboost"
+    assert payload["home_mae"] == 4.5
+    assert "timestamp" in payload
 
 
 # --- save_review_result ---

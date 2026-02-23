@@ -108,24 +108,21 @@ def save_simulation_log(row: dict[str, Any]) -> None:
 
 
 def save_training_log(row: dict[str, Any]) -> None:
-    """Persist a training log to Supabase.  Raises on failure."""
+    """Persist a training log to Supabase.
+
+    All data is stored inside a single ``payload`` JSONB column.
+    Errors are caught so the prediction pipeline never crashes if logging fails.
+    """
     client = _get_client()
     if client is None:
         return
-    record = {
-        "model_version": row.get("model_version", "v1"),
-        "feature_count": row.get("feature_count", 0),
-        "algorithm": row.get("algorithm"),
-        "data_points": row.get("data_points", 0),
-        "home_mae": row.get("home_mae"),
-        "home_rmse": row.get("home_rmse"),
-        "away_mae": row.get("away_mae"),
-        "away_rmse": row.get("away_rmse"),
-        "training_seconds": row.get("training_seconds"),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    client.table("training_logs").insert(record).execute()
-    logger.info("Supabase: training log saved for version %s", row.get("model_version"))
+    record = dict(row)
+    record.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    try:
+        client.table("training_logs").insert({"payload": record}).execute()
+        logger.info("Supabase: training log saved for version %s", row.get("model_version"))
+    except Exception:
+        logger.exception("Supabase: failed to save training log — continuing")
 
 
 def save_review_result(row: dict[str, Any]) -> None:

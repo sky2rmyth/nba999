@@ -33,7 +33,7 @@ def test_ensure_models_returns_cached_when_local_exists():
         result = ensure_models(force=False)
 
     assert result is fake_bundle
-    assert result.source == "Using cached model"
+    assert result.source == "cached"
 
 
 # ---------- ensure_models: loaded from Supabase ----------
@@ -50,7 +50,7 @@ def test_ensure_models_downloads_from_supabase_when_local_missing():
             result = ensure_models(force=False)
 
     assert result is fake_bundle
-    assert result.source == "Loaded from Supabase"
+    assert result.source == "supabase"
 
 
 # ---------- ensure_models: force retrain even when cached ----------
@@ -75,11 +75,13 @@ def test_ensure_models_force_triggers_training():
                 with mock.patch("app.retrain_engine.train_models", return_value=fake_trained):
                     with mock.patch("app.retrain_engine.FEATURE_COLUMNS", ["f"] * 50):
                         with mock.patch("app.supabase_client.upload_models_to_storage", return_value=True):
-                            from app.retrain_engine import ensure_models
-                            result = ensure_models(force=True)
+                            with mock.patch("app.supabase_client.download_models_from_storage", return_value=False):
+                                with mock.patch("app.retrain_engine._count_new_finished_games", return_value=100):
+                                    from app.retrain_engine import ensure_models
+                                    result = ensure_models(force=True)
 
     assert result is fake_trained
-    assert result.source == "Trained new model"
+    assert result.source == "trained"
 
 
 # ---------- ensure_models: force skips training when Supabase has models ----------
@@ -100,7 +102,7 @@ def test_ensure_models_force_uses_supabase_when_available():
 
     mock_download.assert_called_once()
     assert result is fake_restored
-    assert result.source == "Loaded from Supabase"
+    assert result.source == "supabase"
 
 
 # ---------- ensure_models: upload called after training ----------
@@ -127,7 +129,7 @@ def test_ensure_models_uploads_models_after_training():
                                 result = ensure_models(force=False)
 
     mock_upload.assert_called_once()
-    assert result.source == "Trained new model"
+    assert result.source == "trained"
 
 
 def test_ensure_models_raises_when_upload_fails():
@@ -160,3 +162,45 @@ def test_model_bundle_has_source_attribute():
     from app.prediction_models import ModelBundle
     bundle = ModelBundle(None, None, "test")
     assert bundle.source == "unknown"
+
+
+# ---------- ensure_models: skip retraining when insufficient new games ----------
+
+def test_ensure_models_skips_retrain_when_insufficient_games():
+    """When cached exists but fewer than MIN_RETRAIN_GAMES new games, reuse cached."""
+    fake_cached = mock.MagicMock()
+    fake_cached.version = "v5"
+
+    with mock.patch("app.retrain_engine.load_models", return_value=fake_cached):
+        with mock.patch("app.supabase_client.download_models_from_storage", return_value=False):
+            with mock.patch("app.retrain_engine._count_new_finished_games", return_value=10):
+                from app.retrain_engine import ensure_models
+                result = ensure_models(force=True)
+
+    assert result is fake_cached
+    assert result.source == "cached"
+
+
+# ---------- ensure_models: supabase load skips bootstrap ----------
+
+def test_ensure_models_supabase_skips_bootstrap():
+    """When restored from Supabase, bootstrap_historical_data is never called."""
+    fake_bundle = mock.MagicMock()
+    fake_bundle.version = "v3"
+
+    with mock.patch("app.retrain_engine.load_models", side_effect=[None, fake_bundle]):
+        with mock.patch("app.supabase_client.download_models_from_storage", return_value=True):
+            with mock.patch("app.retrain_engine.bootstrap_historical_data") as mock_bootstrap:
+                from app.retrain_engine import ensure_models
+                result = ensure_models(force=False)
+
+    mock_bootstrap.assert_not_called()
+    assert result.source == "supabase"
+
+
+# ---------- MIN_RETRAIN_GAMES constant ----------
+
+def test_min_retrain_games_constant():
+    """MIN_RETRAIN_GAMES is set to 50."""
+    from app.retrain_engine import MIN_RETRAIN_GAMES
+    assert MIN_RETRAIN_GAMES == 50

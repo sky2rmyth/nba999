@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from .api_client import BallDontLieClient
 from .database import get_conn, save_result
+from .rating_engine import is_spread_correct, is_total_correct
 from .retrain_engine import ensure_models
 from .telegram_bot import send_message
 
@@ -34,16 +35,10 @@ def _rolling_performance(days: int = 30) -> dict:
         margin = r["final_home_score"] - r["final_visitor_score"]
         total_pts = r["final_home_score"] + r["final_visitor_score"]
         if r["live_spread"] is not None:
-            spread_correct = ("受让" not in r["spread_pick"] and margin + r["live_spread"] > 0) or (
-                "受让" in r["spread_pick"] and margin + r["live_spread"] <= 0
-            )
-            spread_hits += int(spread_correct)
+            spread_hits += int(is_spread_correct(r["spread_pick"], margin, r["live_spread"]))
             total_bets += 1
         if r["live_total"] is not None:
-            total_correct = (r["total_pick"] == "大分" and total_pts > r["live_total"]) or (
-                r["total_pick"] == "小分" and total_pts <= r["live_total"]
-            )
-            total_hits += int(total_correct)
+            total_hits += int(is_total_correct(r["total_pick"], total_pts, r["live_total"]))
             total_bets += 1
 
     count = len(rows)
@@ -84,12 +79,8 @@ def run_review(target_date: str | None = None) -> None:
     for r in rows:
         margin = r["final_home_score"] - r["final_visitor_score"]
         total = r["final_home_score"] + r["final_visitor_score"]
-        spread_correct = ("受让" not in r["spread_pick"] and margin + (r["live_spread"] or 0) > 0) or (
-            "受让" in r["spread_pick"] and margin + (r["live_spread"] or 0) <= 0
-        )
-        total_correct = (r["total_pick"] == "大分" and r["live_total"] is not None and total > r["live_total"]) or (
-            r["total_pick"] == "小分" and r["live_total"] is not None and total <= r["live_total"]
-        )
+        spread_correct = is_spread_correct(r["spread_pick"], margin, r["live_spread"] or 0)
+        total_correct = is_total_correct(r["total_pick"], total, r["live_total"])
         spread_hits += int(spread_correct)
         total_hits += int(total_correct)
         clv_open += abs((r["opening_spread"] or 0) - (r["live_spread"] or 0))

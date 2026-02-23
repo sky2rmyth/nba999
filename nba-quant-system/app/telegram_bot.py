@@ -50,7 +50,7 @@ def edit_message(message_id: int, text: str) -> None:
         resp = requests.post(_bot_url("editMessageText"), json=payload, timeout=20)
         resp.raise_for_status()
     except Exception:
-        logger.debug("edit_message failed for message_id=%s", message_id)
+        logger.debug("edit_message failed for message_id=%s", message_id, exc_info=True)
 
 
 def control_panel_markup() -> dict:
@@ -109,7 +109,7 @@ class ProgressTracker:
         try:
             self.message_id = send_message(self._build_text(), reply_markup={})
         except Exception:
-            logger.debug("ProgressTracker.start: send failed")
+            logger.debug("ProgressTracker.start: send failed", exc_info=True)
 
     def advance(self, stage_index: int) -> None:
         self.current_stage = stage_index
@@ -129,4 +129,4 @@ class ProgressTracker:
         try:
             edit_message(self.message_id, self._build_text())
         except Exception:
-            logger.debug("ProgressTracker._update: edit failed")
+            logger.debug("ProgressTracker._update: edit failed", exc_info=True)

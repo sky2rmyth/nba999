@@ -6,6 +6,7 @@ from .data_pipeline import bootstrap_historical_data
 from .database import get_conn, init_db
 from .feature_engineering import FEATURE_COLUMNS, build_training_frame
 from .prediction_models import load_models, train_models, _current_version
+from .rating_engine import is_spread_correct, is_total_correct
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,10 @@ def _check_performance_degradation() -> bool:
             margin = r["final_home_score"] - r["final_visitor_score"]
             total_pts = r["final_home_score"] + r["final_visitor_score"]
             if r["live_spread"] is not None:
-                spread_correct = ("受让" not in r["spread_pick"] and margin + r["live_spread"] > 0) or (
-                    "受让" in r["spread_pick"] and margin + r["live_spread"] <= 0
-                )
-                hits += int(spread_correct)
+                hits += int(is_spread_correct(r["spread_pick"], margin, r["live_spread"]))
                 total += 1
             if r["live_total"] is not None:
-                total_correct = (r["total_pick"] == "大分" and total_pts > r["live_total"]) or (
-                    r["total_pick"] == "小分" and total_pts <= r["live_total"]
-                )
-                hits += int(total_correct)
+                hits += int(is_total_correct(r["total_pick"], total_pts, r["live_total"]))
                 total += 1
         if total == 0:
             return False

@@ -123,9 +123,13 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
     away_model.fit(X_train, ya_train)
 
     # --- Hybrid: Spread Cover classifier ---
+    # Uses home win as proxy for spread cover since historical spread lines
+    # are not available in training data. The classifier learns team strength
+    # patterns that correlate with covering; Monte Carlo handles the actual
+    # spread line comparison at prediction time.
     spread_cover_model, total_model = _build_classifier()
     margin = df["home_score"].values - df["away_score"].values
-    y_spread_cover = (margin > 0).astype(int)  # 1 = home covers (simplified: home wins)
+    y_spread_cover = (margin > 0).astype(int)
     total_points = df["home_score"].values + df["away_score"].values
     median_total = float(np.median(total_points))
     y_total_over = (total_points > median_total).astype(int)

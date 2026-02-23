@@ -8,6 +8,7 @@ from pathlib import Path
 from .database import get_conn, init_db
 from .prediction_models import MODEL_DIR, _current_version, load_models
 from .feature_engineering import FEATURE_COLUMNS
+from .rating_engine import is_spread_correct, is_total_correct
 from .telegram_bot import send_message
 
 logger = logging.getLogger(__name__)
@@ -57,16 +58,8 @@ def run_model_status() -> None:
             for r in rows:
                 margin = r["final_home_score"] - r["final_visitor_score"]
                 total_pts = r["final_home_score"] + r["final_visitor_score"]
-                if r["live_spread"] is not None:
-                    s_ok = ("受让" not in r["spread_pick"] and margin + r["live_spread"] > 0) or (
-                        "受让" in r["spread_pick"] and margin + r["live_spread"] <= 0
-                    )
-                    s_hits += int(s_ok)
-                if r["live_total"] is not None:
-                    t_ok = (r["total_pick"] == "大分" and total_pts > r["live_total"]) or (
-                        r["total_pick"] == "小分" and total_pts <= r["live_total"]
-                    )
-                    t_hits += int(t_ok)
+                s_hits += int(is_spread_correct(r["spread_pick"], margin, r["live_spread"]))
+                t_hits += int(is_total_correct(r["total_pick"], total_pts, r["live_total"]))
             n = len(rows)
             perf_line = (
                 f"\n📊 最近 {n} 场表现\n"

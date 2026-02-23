@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 MIN_SIMULATION_COUNT = 10000
 
+# Hybrid model blending weights: Monte Carlo simulation vs classifier model.
+# MC simulation captures game-specific dynamics; classifier captures historical patterns.
+MC_WEIGHT = 0.6
+CLASSIFIER_WEIGHT = 0.4
+
 
 def _verify_models_present() -> bool:
     hp = MODEL_DIR / "home_score_model.pkl"
@@ -238,7 +243,7 @@ def run_prediction(target_date: str | None = None) -> None:
         # --- Hybrid spread decision: combine Monte Carlo + classifier ---
         mc_spread_prob = sim["spread_cover_probability"]
         if spread_cover_prob_model is not None:
-            combined_spread_prob = 0.6 * mc_spread_prob + 0.4 * spread_cover_prob_model
+            combined_spread_prob = MC_WEIGHT * mc_spread_prob + CLASSIFIER_WEIGHT * spread_cover_prob_model
         else:
             combined_spread_prob = mc_spread_prob
 
@@ -252,7 +257,7 @@ def run_prediction(target_date: str | None = None) -> None:
         # --- Hybrid total decision: combine Monte Carlo + classifier ---
         mc_total_prob = sim["over_probability"]
         if total_over_prob_model is not None:
-            combined_total_prob = 0.6 * mc_total_prob + 0.4 * total_over_prob_model
+            combined_total_prob = MC_WEIGHT * mc_total_prob + CLASSIFIER_WEIGHT * total_over_prob_model
         else:
             combined_total_prob = mc_total_prob
 

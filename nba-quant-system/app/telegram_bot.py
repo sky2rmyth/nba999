@@ -54,11 +54,12 @@ def edit_message(message_id: int, text: str) -> None:
 
 
 def control_panel_markup() -> dict:
+    base_url = os.getenv("GITHUB_PAGES_URL", "https://skyzmyth.github.io/nba999/")
     return {
         "inline_keyboard": [
-            [{"text": "📊 今日预测", "callback_data": "predict_today"}],
-            [{"text": "🔁 复盘学习", "callback_data": "review_today"}],
-            [{"text": "📈 模型状态", "callback_data": "model_status"}],
+            [{"text": "📊 今日预测", "url": f"{base_url}?action=predict"}],
+            [{"text": "🔁 复盘学习", "url": f"{base_url}?action=review"}],
+            [{"text": "📈 模型状态", "url": f"{base_url}?action=model_status"}],
         ]
     }
 

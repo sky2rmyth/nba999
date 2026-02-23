@@ -4,13 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NBA Quant System</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--tg-theme-bg-color, #1a1a2e);
-            color: var(--tg-theme-text-color, #e0e0e0);
+            background: #1a1a2e;
+            color: #e0e0e0;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -55,7 +54,7 @@
             max-width: 400px;
             padding: 16px;
             border-radius: 12px;
-            background: var(--tg-theme-secondary-bg-color, #16213e);
+            background: #16213e;
             font-size: 14px;
             display: none;
         }
@@ -75,28 +74,64 @@
     </div>
     <div id="status" class="status-bar"></div>
     <script>
-        const tg = window.Telegram && window.Telegram.WebApp;
-        if (tg) { tg.ready(); tg.expand(); }
-
+        const OWNER = 'sky2rmyth';
+        const REPO = 'nba999';
         const WORKFLOWS = {
             predict: 'predict.yml',
             review: 'review.yml',
             model_status: 'model_status.yml'
         };
 
-        function dispatch(action) {
-            const file = WORKFLOWS[action];
-            if (!file) return;
-            const el = document.getElementById('status');
+        function showStatus(msg) {
+            var el = document.getElementById('status');
             el.className = 'status-bar visible';
-            el.innerHTML = '<div class="line">⏳ 正在触发工作流...</div>';
-
-            if (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) {
-                el.innerHTML = '<div class="line">✅ 指令已发送至后台</div>';
-            } else {
-                el.innerHTML = '<div class="line">✅ 请通过 Telegram 机器人触发操作</div>';
-            }
+            el.innerHTML = '<div class="line">' + msg + '</div>';
         }
+
+        function dispatch(action) {
+            var file = WORKFLOWS[action];
+            if (!file) return;
+            showStatus('⏳ 正在触发工作流...');
+
+            var token = localStorage.getItem('gh_token');
+            if (!token) {
+                token = prompt('请输入 GitHub Personal Access Token:');
+                if (!token) {
+                    showStatus('❌ 需要 GitHub Token 才能触发工作流');
+                    return;
+                }
+                localStorage.setItem('gh_token', token);
+            }
+
+            var url = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/actions/workflows/' + file + '/dispatches';
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Accept': 'application/vnd.github+json'
+                },
+                body: JSON.stringify({ ref: 'main' })
+            }).then(function(resp) {
+                if (resp.status === 204) {
+                    showStatus('✅ 工作流已触发成功');
+                } else if (resp.status === 401 || resp.status === 403) {
+                    localStorage.removeItem('gh_token');
+                    showStatus('❌ Token 无效或权限不足，请重试');
+                } else {
+                    showStatus('❌ 触发失败 (HTTP ' + resp.status + ')');
+                }
+            }).catch(function() {
+                showStatus('❌ 网络错误，请重试');
+            });
+        }
+
+        (function autoDispatch() {
+            var params = new URLSearchParams(window.location.search);
+            var action = params.get('action');
+            if (action && WORKFLOWS[action]) {
+                dispatch(action);
+            }
+        })();
     </script>
 </body>
 </html>

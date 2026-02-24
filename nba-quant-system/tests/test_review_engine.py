@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from app.review_engine import (
     build_review_message,
+    build_review_summary,
     calc_spread_hit,
     calc_total_hit,
     calculate_rates,
@@ -595,3 +596,38 @@ class TestBuildReviewMessage:
         assert "113 - 103" in msg
         assert "True" not in msg
         assert "False" not in msg
+
+
+# --- build_review_summary ---
+
+class TestBuildReviewSummary:
+    def test_empty_data_returns_no_data_message(self):
+        """No review rows returns the placeholder string."""
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=[])
+        result = build_review_summary(mock_client)
+        assert result == "暂无复盘数据"
+
+    def test_summary_with_data(self):
+        """Summary includes rates and game count."""
+        rows = [
+            {"spread_hit": True, "ou_hit": False, "reviewed_at": "2026-02-20T10:00:00Z"},
+            {"spread_hit": False, "ou_hit": True, "reviewed_at": "2026-02-21T10:00:00Z"},
+        ]
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=rows)
+        result = build_review_summary(mock_client)
+        assert "复盘报告" in result
+        assert "50.0%" in result
+        assert "复盘场次：2" in result
+
+    def test_summary_last30_section(self):
+        """Recent rows appear in 30-day rolling section."""
+        rows = [
+            {"spread_hit": True, "ou_hit": True, "reviewed_at": "2026-02-20T10:00:00"},
+        ]
+        mock_client = MagicMock()
+        mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=rows)
+        result = build_review_summary(mock_client)
+        assert "近30天滚动表现" in result
+        assert "样本数：1" in result

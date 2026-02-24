@@ -82,6 +82,44 @@ def _get_table_columns(table: str) -> set[str] | None:
     return None
 
 
+def get_table_columns(table: str) -> set[str]:
+    """Return known column names for *table*.
+
+    Public wrapper around ``_get_table_columns``.  Returns an empty set when
+    the columns cannot be determined (table empty or Supabase unavailable).
+    """
+    return _get_table_columns(table) or set()
+
+
+def adaptive_upsert(
+    table: str,
+    record: dict[str, Any],
+    conflict: str = "game_id",
+) -> None:
+    """Upsert *record* into *table*, automatically filtering unknown columns.
+
+    If the table schema can be discovered, only fields whose names match
+    existing columns are written.  When column discovery fails (e.g. the
+    table is empty), the full record is passed through so new tables can
+    be populated.
+    """
+    client = _get_client()
+    if client is None:
+        return
+
+    cols = _get_table_columns(table)
+    if cols is not None:
+        filtered = {k: v for k, v in record.items() if k in cols}
+    else:
+        filtered = record
+
+    if not filtered:
+        logger.warning("No valid columns to write for table '%s'. Attempted: %s", table, list(record.keys()))
+        return
+
+    client.table(table).upsert(filtered, on_conflict=conflict).execute()
+
+
 def save_prediction(row: dict[str, Any]) -> None:
     """Persist a prediction row to Supabase.
 
@@ -150,24 +188,14 @@ def save_review_result(row: dict[str, Any]) -> None:
 
     Each game_id appears only once in the ``review_results`` table.  If a
     result already exists for the game, it is updated instead of duplicated.
-    The record is dynamically filtered to only include columns that exist in
-    the table.  Unknown fields are silently ignored and failures are caught
-    so the workflow never crashes due to schema mismatches.
+    Uses ``adaptive_upsert`` so that unknown columns are silently dropped
+    and schema changes never crash the workflow.
     """
-    client = _get_client()
-    if client is None:
-        return
-
     record = dict(row)
     record.setdefault("reviewed_at", datetime.now(timezone.utc).isoformat())
 
-    # Filter to only columns the table actually has
-    db_columns = _get_table_columns("review_results")
-    if db_columns is not None:
-        record = {k: v for k, v in record.items() if k in db_columns}
-
     try:
-        client.table("review_results").upsert(record, on_conflict="game_id").execute()
+        adaptive_upsert("review_results", record)
         logger.info("Supabase: review result saved for game %s", row.get("game_id"))
     except Exception:
         logger.exception("Supabase: failed to save review result for game %s — continuing", row.get("game_id"))

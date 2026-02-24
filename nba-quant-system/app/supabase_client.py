@@ -375,6 +375,9 @@ def ensure_review_schema() -> None:
 
     for col, col_type in required_columns.items():
         if col not in existing:
+            if not col.isidentifier() or not col_type.replace("8", "").isalpha():
+                logger.warning("Skipping invalid column spec: %s %s", col, col_type)
+                continue
             try:
                 client.rpc(
                     "execute_sql",

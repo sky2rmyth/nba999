@@ -205,7 +205,7 @@ def run_review() -> None:
     predictions = load_latest_predictions()
 
     if not predictions:
-        print("No predictions to review.")
+        logger.info("No predictions to review.")
         return
 
     for p in predictions:

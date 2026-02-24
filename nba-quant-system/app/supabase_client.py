@@ -146,12 +146,13 @@ def save_training_log(row: dict[str, Any]) -> None:
 
 
 def save_review_result(row: dict[str, Any]) -> None:
-    """Persist a review result to Supabase.
+    """Persist a review result to Supabase via UPSERT on game_id.
 
+    Each game_id appears only once in the ``review_results`` table.  If a
+    result already exists for the game, it is updated instead of duplicated.
     The record is dynamically filtered to only include columns that exist in
-    the ``review_results`` table.  Unknown fields are silently ignored and
-    insert failures are caught so the workflow never crashes due to schema
-    mismatches.
+    the table.  Unknown fields are silently ignored and failures are caught
+    so the workflow never crashes due to schema mismatches.
     """
     client = _get_client()
     if client is None:
@@ -166,7 +167,7 @@ def save_review_result(row: dict[str, Any]) -> None:
         record = {k: v for k, v in record.items() if k in db_columns}
 
     try:
-        client.table("review_results").insert(record).execute()
+        client.table("review_results").upsert(record, on_conflict="game_id").execute()
         logger.info("Supabase: review result saved for game %s", row.get("game_id"))
     except Exception:
         logger.exception("Supabase: failed to save review result for game %s — continuing", row.get("game_id"))
@@ -235,7 +236,11 @@ def fetch_predictions_for_date(game_date: str) -> list[dict[str, Any]]:
 
 
 def fetch_all_predictions() -> list[dict[str, Any]]:
-    """Fetch all prediction records from Supabase.
+    """Fetch all prediction records from Supabase ordered by created_at desc.
+
+    Results are ordered newest-first so that client-side deduplication
+    (``_deduplicate_predictions``) retains only the latest prediction per
+    ``game_id``.
 
     Returns a list of raw rows (each containing ``id``, ``game_id``,
     ``payload``, and optionally ``game_date``).
@@ -244,7 +249,7 @@ def fetch_all_predictions() -> list[dict[str, Any]]:
     if client is None:
         return []
     try:
-        resp = client.table("predictions").select("*").execute()
+        resp = client.table("predictions").select("*").order("created_at", desc=True).execute()
         return resp.data or []
     except Exception:
         logger.debug("Supabase: could not fetch all predictions")

@@ -388,33 +388,48 @@ class TestFetchGameResult:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "resultSets": [
-                {}, {}, {}, {}, {},
-                {"rowSet": [
-                    [None] * 22 + [98],   # visitor score at index 22
-                    [None] * 22 + [105],  # home score at index 22
-                ]},
-            ]
+            "data": {
+                "status": "Final",
+                "home_team_score": 105,
+                "visitor_team_score": 98,
+            }
         }
         mock_get.return_value = mock_resp
-        result = fetch_game_result("0022400001")
+        result = fetch_game_result(12345)
         assert result["home_score"] == 105
         assert result["visitor_score"] == 98
         assert result["spread"] == 0
-        assert result["total"] == 203
+        assert result["total"] == 0
+
+    @patch("app.review_engine.requests.get")
+    def test_game_not_final_returns_none(self, mock_get):
+        """Non-final game status returns None."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "data": {
+                "status": "In Progress",
+                "home_team_score": 50,
+                "visitor_team_score": 48,
+            }
+        }
+        mock_get.return_value = mock_resp
+        result = fetch_game_result(12345)
+        assert result is None
 
     @patch("app.review_engine.requests.get")
     def test_api_non_200_returns_none(self, mock_get):
         """Non-200 status code returns None."""
         mock_resp = MagicMock()
         mock_resp.status_code = 403
+        mock_resp.text = "Forbidden"
         mock_get.return_value = mock_resp
-        result = fetch_game_result("0022400001")
+        result = fetch_game_result(12345)
         assert result is None
 
     @patch("app.review_engine.requests.get")
     def test_api_exception_returns_none(self, mock_get):
         """Network error returns None."""
         mock_get.side_effect = Exception("timeout")
-        result = fetch_game_result("0022400001")
+        result = fetch_game_result(12345)
         assert result is None

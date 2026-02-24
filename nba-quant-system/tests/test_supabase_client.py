@@ -18,9 +18,11 @@ def _reset_client():
     """Reset module-level state between tests."""
     supabase_client._client = None
     supabase_client._available = None
+    supabase_client._table_columns_cache.clear()
     yield
     supabase_client._client = None
     supabase_client._available = None
+    supabase_client._table_columns_cache.clear()
 
 
 # --- _get_client ---
@@ -204,21 +206,29 @@ def test_save_training_log_uses_payload_jsonb():
 
 # --- save_review_result ---
 
-def test_save_review_result_raises_on_failure():
-    """save_review_result raises when Supabase insert fails."""
+def test_save_review_result_does_not_raise_on_failure():
+    """save_review_result swallows exceptions so the workflow never crashes."""
     fake_client = mock.MagicMock()
     fake_client.table.return_value.insert.return_value.execute.side_effect = RuntimeError("fail")
+    # Column discovery returns no data (empty table)
+    fake_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock.MagicMock(data=[])
     supabase_client._client = fake_client
     supabase_client._available = True
-    with pytest.raises(RuntimeError):
-        supabase_client.save_review_result({"game_id": 1})
+    supabase_client.save_review_result({"game_id": 1})  # should not raise
 
 
 def test_save_review_result_includes_fields():
-    """save_review_result record contains expected fields."""
+    """save_review_result record contains expected fields when all columns exist."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
+
+    # Pre-populate column cache so _get_table_columns is not called
+    supabase_client._table_columns_cache["review_results"] = {
+        "game_id", "game_date", "home_team", "away_team",
+        "spread_pick", "total_pick", "spread_correct", "total_correct",
+        "final_home_score", "final_visitor_score", "reviewed_at",
+    }
 
     supabase_client.save_review_result({
         "game_id": 42,
@@ -246,6 +256,55 @@ def test_save_review_result_skips_when_not_configured():
     """save_review_result is a no-op without credentials."""
     supabase_client._available = False
     supabase_client.save_review_result({"game_id": 1})  # should not raise
+
+
+def test_save_review_result_filters_unknown_columns():
+    """save_review_result drops fields not present in the DB table."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    # Simulate a table that only has game_id and reviewed_at columns
+    supabase_client._table_columns_cache["review_results"] = {"game_id", "reviewed_at"}
+
+    supabase_client.save_review_result({
+        "game_id": 42,
+        "home_team": "Lakers",
+        "away_team": "Celtics",
+        "spread_correct": True,
+        "unknown_field": "ignored",
+    })
+
+    inserted = fake_client.table.return_value.insert.call_args[0][0]
+    assert inserted["game_id"] == 42
+    assert "reviewed_at" in inserted
+    # Fields not in the DB columns should be excluded
+    assert "home_team" not in inserted
+    assert "away_team" not in inserted
+    assert "spread_correct" not in inserted
+    assert "unknown_field" not in inserted
+
+
+def test_save_review_result_passes_all_when_columns_unknown():
+    """When column discovery fails, all fields are passed through."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    # Column cache set to None (simulating empty table or failed discovery)
+    supabase_client._table_columns_cache["review_results"] = None
+
+    supabase_client.save_review_result({
+        "game_id": 42,
+        "home_team": "Lakers",
+        "extra_field": "kept",
+    })
+
+    inserted = fake_client.table.return_value.insert.call_args[0][0]
+    assert inserted["game_id"] == 42
+    assert inserted["home_team"] == "Lakers"
+    assert inserted["extra_field"] == "kept"
+    assert "reviewed_at" in inserted
 
 
 # --- upload_models_to_storage ---

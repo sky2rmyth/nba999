@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _client: Any = None
 _available: bool | None = None
+_table_columns_cache: dict[str, set[str] | None] = {}
 
 
 def _get_client() -> Any:
@@ -52,6 +53,33 @@ def _ensure_tables() -> None:
             logger.info("Supabase table '%s' accessible", table)
         except Exception:
             logger.warning("Supabase table '%s' not accessible — create it in Supabase dashboard", table)
+
+
+def _get_table_columns(table: str) -> set[str] | None:
+    """Discover column names for *table* by selecting a single row.
+
+    Returns a set of column names if at least one row exists, otherwise None.
+    The result is cached so the query runs at most once per process.
+    """
+    if table in _table_columns_cache:
+        return _table_columns_cache[table]
+
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        resp = client.table(table).select("*").limit(1).execute()
+        if resp.data:
+            columns = set(resp.data[0].keys())
+            _table_columns_cache[table] = columns
+            logger.debug("Discovered columns for '%s': %s", table, columns)
+            return columns
+    except Exception:
+        logger.debug("Could not discover columns for table '%s'", table, exc_info=True)
+
+    _table_columns_cache[table] = None
+    return None
 
 
 def save_prediction(row: dict[str, Any]) -> None:
@@ -118,28 +146,30 @@ def save_training_log(row: dict[str, Any]) -> None:
 
 
 def save_review_result(row: dict[str, Any]) -> None:
-    """Persist a review result to Supabase.  Raises on failure."""
+    """Persist a review result to Supabase.
+
+    The record is dynamically filtered to only include columns that exist in
+    the ``review_results`` table.  Unknown fields are silently ignored and
+    insert failures are caught so the workflow never crashes due to schema
+    mismatches.
+    """
     client = _get_client()
     if client is None:
         return
-    record = {
-        "game_id": row.get("game_id"),
-        "game_date": row.get("game_date"),
-        "home_team": row.get("home_team"),
-        "away_team": row.get("away_team"),
-        "spread_pick": row.get("spread_pick"),
-        "total_pick": row.get("total_pick"),
-        "spread_correct": row.get("spread_correct"),
-        "total_correct": row.get("total_correct"),
-        "final_home_score": row.get("final_home_score"),
-        "final_visitor_score": row.get("final_visitor_score"),
-        "spread_rate": row.get("spread_rate"),
-        "total_rate": row.get("total_rate"),
-        "roi": row.get("roi"),
-        "reviewed_at": datetime.now(timezone.utc).isoformat(),
-    }
-    client.table("review_results").insert(record).execute()
-    logger.info("Supabase: review result saved for game %s", row.get("game_id"))
+
+    record = dict(row)
+    record.setdefault("reviewed_at", datetime.now(timezone.utc).isoformat())
+
+    # Filter to only columns the table actually has
+    db_columns = _get_table_columns("review_results")
+    if db_columns is not None:
+        record = {k: v for k, v in record.items() if k in db_columns}
+
+    try:
+        client.table("review_results").insert(record).execute()
+        logger.info("Supabase: review result saved for game %s", row.get("game_id"))
+    except Exception:
+        logger.exception("Supabase: failed to save review result for game %s — continuing", row.get("game_id"))
 
 
 def fetch_latest_training_metrics() -> dict[str, Any] | None:

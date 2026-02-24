@@ -4,13 +4,19 @@ from __future__ import annotations
 from unittest.mock import patch, MagicMock
 
 from app.review_engine import (
+    build_review_message,
+    calc_spread_hit,
+    calc_total_hit,
     calculate_rates,
     extract_prediction_fields,
     fetch_game_result,
+    format_spread_text,
+    format_total_text,
     parse_prediction,
     run_review,
     spread_hit,
     total_hit,
+    zh_hit,
 )
 
 
@@ -385,7 +391,7 @@ class TestExtractPredictionFields:
 class TestFetchGameResult:
     @patch("app.review_engine.requests.get")
     def test_successful_fetch(self, mock_get):
-        """Successful API call returns scores dict with spread and total."""
+        """Successful API call returns scores dict with spread, total, and team names."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -393,6 +399,8 @@ class TestFetchGameResult:
                 "status": "Final",
                 "home_team_score": 105,
                 "visitor_team_score": 98,
+                "home_team": {"full_name": "Los Angeles Lakers"},
+                "visitor_team": {"full_name": "Golden State Warriors"},
             }
         }
         mock_get.return_value = mock_resp
@@ -401,6 +409,8 @@ class TestFetchGameResult:
         assert result["visitor_score"] == 98
         assert result["spread"] == 0
         assert result["total"] == 0
+        assert result["home_team"] == "Los Angeles Lakers"
+        assert result["visitor_team"] == "Golden State Warriors"
 
     @patch("app.review_engine.requests.get")
     def test_game_not_final_returns_none(self, mock_get):
@@ -442,19 +452,19 @@ class TestRunReviewTelegram:
     @patch("app.review_engine.send_message")
     @patch("app.review_engine.fetch_game_result")
     @patch("app.review_engine.load_latest_predictions")
-    @patch("app.review_engine.extract_prediction_fields")
     def test_send_message_called_after_review(
-        self, mock_extract, mock_load, mock_fetch, mock_send
+        self, mock_load, mock_fetch, mock_send
     ):
-        """run_review sends a Telegram message for each reviewed game."""
+        """run_review sends a Chinese Telegram message for each reviewed game."""
         mock_load.return_value = [
             {
                 "game_id": 42,
                 "payload": {"details": {"simulation": {"predicted_margin": 5.0, "predicted_total": 215.0}}},
             }
         ]
-        mock_extract.return_value = ("home", "over")
         mock_fetch.return_value = {
+            "home_team": "Los Angeles Lakers",
+            "visitor_team": "Golden State Warriors",
             "home_score": 110,
             "visitor_score": 100,
             "spread": 0,
@@ -467,6 +477,121 @@ class TestRunReviewTelegram:
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
-        assert "42" in msg
+        assert "NBA复盘结果" in msg
+        assert "Los Angeles Lakers" in msg
+        assert "Golden State Warriors" in msg
         assert "110" in msg
         assert "100" in msg
+        assert "命中" in msg or "未中" in msg
+        assert "True" not in msg
+        assert "False" not in msg
+
+
+# --- calc_spread_hit ---
+
+class TestCalcSpreadHit:
+    def test_home_covers_with_negative_spread(self):
+        """Home favored by 4.5 and wins by 10 → hit."""
+        assert calc_spread_hit("home", "LAL", "GSW", 113, 103, -4.5) is True
+
+    def test_home_does_not_cover(self):
+        """Home favored by 4.5 but wins by only 3 → miss."""
+        assert calc_spread_hit("home", "LAL", "GSW", 106, 103, -4.5) is False
+
+    def test_away_covers(self):
+        """Away gets +4.5, home wins by only 3 → away covers."""
+        assert calc_spread_hit("away", "LAL", "GSW", 106, 103, -4.5) is True
+
+    def test_away_does_not_cover(self):
+        """Away gets +4.5 but home wins by 10 → away miss."""
+        assert calc_spread_hit("away", "LAL", "GSW", 113, 103, -4.5) is False
+
+    def test_unknown_pick_returns_false(self):
+        assert calc_spread_hit("unknown", "LAL", "GSW", 110, 100, 0) is False
+
+    def test_exact_zero_adjusted_margin_home(self):
+        """Adjusted margin exactly 0 is not a hit for home (push)."""
+        assert calc_spread_hit("home", "LAL", "GSW", 105, 100, -5) is False
+
+
+# --- calc_total_hit ---
+
+class TestCalcTotalHit:
+    def test_over_hits(self):
+        assert calc_total_hit("over", 115, 110, 220) is True
+
+    def test_over_misses(self):
+        assert calc_total_hit("over", 100, 105, 220) is False
+
+    def test_under_hits(self):
+        assert calc_total_hit("under", 100, 105, 220) is True
+
+    def test_under_misses(self):
+        assert calc_total_hit("under", 115, 110, 220) is False
+
+    def test_unknown_pick_returns_false(self):
+        assert calc_total_hit("", 110, 100, 220) is False
+
+    def test_exact_total_equals_line(self):
+        """Total exactly equals line — not a hit for over (push)."""
+        assert calc_total_hit("over", 110, 110, 220) is False
+
+
+# --- zh_hit ---
+
+class TestZhHit:
+    def test_true_returns_hit(self):
+        assert zh_hit(True) == "✅命中"
+
+    def test_false_returns_miss(self):
+        assert zh_hit(False) == "❌未中"
+
+
+# --- format_spread_text ---
+
+class TestFormatSpreadText:
+    def test_home_pick(self):
+        assert format_spread_text("home", "湖人", "勇士", -4.5) == "湖人 -4.5"
+
+    def test_away_pick_negative_spread(self):
+        """Away pick with negative spread shows + sign."""
+        assert format_spread_text("away", "湖人", "勇士", -4.5) == "勇士 +4.5"
+
+    def test_away_pick_positive_spread(self):
+        """Away pick with positive spread shows - sign."""
+        assert format_spread_text("away", "湖人", "勇士", 3.0) == "勇士 -3.0"
+
+
+# --- format_total_text ---
+
+class TestFormatTotalText:
+    def test_over(self):
+        assert format_total_text("over", 228.5) == "大分 228.5"
+
+    def test_under(self):
+        assert format_total_text("under", 228.5) == "小分 228.5"
+
+
+# --- build_review_message ---
+
+class TestBuildReviewMessage:
+    def test_message_contains_chinese_elements(self):
+        result = {
+            "home_team": "湖人",
+            "visitor_team": "勇士",
+            "home_score": 113,
+            "visitor_score": 103,
+            "spread": -4.5,
+            "total": 228.5,
+        }
+        pred = {"spread_pick": "home", "total_pick": "over"}
+        msg = build_review_message(result, pred, True, False)
+        assert "NBA复盘结果" in msg
+        assert "湖人 vs 勇士" in msg
+        assert "湖人 -4.5" in msg
+        assert "大分 228.5" in msg
+        assert "✅命中" in msg
+        assert "❌未中" in msg
+        assert "113 - 103" in msg
+        assert "True" not in msg
+        assert "False" not in msg

@@ -45,6 +45,93 @@ def total_hit(row: dict) -> bool:
     return False
 
 
+def calc_spread_hit(pred_pick, home_team, visitor_team,
+                    final_home, final_visitor,
+                    spread_line):
+    """Unified betting spread logic.
+
+    adjusted_margin = (home score - visitor score) + spread_line
+    If picking home: hit when adjusted_margin > 0
+    If picking away: hit when adjusted_margin < 0
+    """
+    actual_margin = final_home - final_visitor
+    adjusted_margin = actual_margin + spread_line
+
+    if pred_pick == "home":
+        return adjusted_margin > 0
+    if pred_pick == "away":
+        return adjusted_margin < 0
+    return False
+
+
+def calc_total_hit(total_pick, final_home, final_visitor, total_line):
+    """Over/under hit logic.
+
+    Over: actual total > line
+    Under: actual total < line
+    """
+    final_total = final_home + final_visitor
+
+    if total_pick == "over":
+        return final_total > total_line
+    if total_pick == "under":
+        return final_total < total_line
+    return False
+
+
+def zh_hit(flag):
+    """Return Chinese hit/miss indicator."""
+    return "✅命中" if flag else "❌未中"
+
+
+def format_spread_text(pick, home_team, visitor_team, spread):
+    """Format spread recommendation in Chinese."""
+    if pick == "home":
+        return f"{home_team} {spread}"
+    else:
+        sign = "+" if spread < 0 else "-"
+        return f"{visitor_team} {sign}{abs(spread)}"
+
+
+def format_total_text(total_pick, total_line):
+    """Format total recommendation in Chinese."""
+    direction = "大分" if total_pick == "over" else "小分"
+    return f"{direction} {total_line}"
+
+
+def build_review_message(result, pred, spread_result, total_result):
+    """Build Chinese Telegram review message."""
+    home = result["home_team"]
+    away = result["visitor_team"]
+
+    spread_text = format_spread_text(
+        pred["spread_pick"], home, away, result["spread"]
+    )
+    total_text = format_total_text(
+        pred["total_pick"], result["total"]
+    )
+    score = f"{result['home_score']} - {result['visitor_score']}"
+
+    message = (
+        "📊 NBA复盘结果\n"
+        "\n"
+        "🏀 对阵：\n"
+        f"{home} vs {away}\n"
+        "\n"
+        "📉 让分推荐：\n"
+        f"{spread_text}\n"
+        f"结果：{zh_hit(spread_result)}\n"
+        "\n"
+        "📈 大小分推荐：\n"
+        f"{total_text}\n"
+        f"结果：{zh_hit(total_result)}\n"
+        "\n"
+        "🔢 最终比分：\n"
+        f"{score}"
+    )
+    return message
+
+
 def calculate_rates(rows: list[dict]) -> tuple[float, float, float]:
     """Compute spread, total, and overall hit rates from review result rows.
 
@@ -174,7 +261,12 @@ def fetch_game_result(game_id):
             print("GAME NOT FINISHED:", game_id)
             return None
 
+        home_team_data = data.get("home_team", {})
+        visitor_team_data = data.get("visitor_team", {})
+
         return {
+            "home_team": home_team_data.get("full_name", ""),
+            "visitor_team": visitor_team_data.get("full_name", ""),
             "home_score": data["home_team_score"],
             "visitor_score": data["visitor_team_score"],
             "spread": 0,
@@ -193,7 +285,7 @@ def run_review() -> None:
 
     for p in predictions:
         game_id = p["game_id"]
-        spread_pick, total_pick = extract_prediction_fields(p)
+        pred = parse_prediction(p)
 
         result = fetch_game_result(game_id)
         print("GAME RESULT:", game_id, result)
@@ -202,55 +294,42 @@ def run_review() -> None:
             print("NO RESULT FOUND:", game_id)
             continue
 
-        home = result["home_score"]
-        away = result["visitor_score"]
+        final_home = result["home_score"]
+        final_visitor = result["visitor_score"]
 
-        actual_margin = home - away
-        actual_total = home + away
-
-        s_hit = (
-            actual_margin > 0
-            if spread_pick == "home"
-            else actual_margin < 0
+        spread_result = calc_spread_hit(
+            pred["spread_pick"],
+            result.get("home_team", ""),
+            result.get("visitor_team", ""),
+            final_home,
+            final_visitor,
+            result["spread"]
         )
 
-        payload = p.get("payload", {})
-        details = payload.get("details", {})
-        sim = details.get("simulation", {})
-        predicted_total = sim.get("predicted_total")
-
-        if predicted_total is not None:
-            o_hit = (
-                actual_total > predicted_total
-                if total_pick == "over"
-                else actual_total < predicted_total
-            )
-        else:
-            o_hit = False
+        total_result = calc_total_hit(
+            pred["total_pick"],
+            final_home,
+            final_visitor,
+            result["total"]
+        )
 
         record = {
             "game_id": game_id,
-            "spread_pick": spread_pick,
-            "total_pick": total_pick,
-            "spread_hit": s_hit,
-            "ou_hit": o_hit,
-            "final_home_score": home,
-            "final_visitor_score": away,
+            "spread_pick": pred["spread_pick"],
+            "total_pick": pred["total_pick"],
+            "spread_hit": spread_result,
+            "ou_hit": total_result,
+            "final_home_score": final_home,
+            "final_visitor_score": final_visitor,
             "reviewed_at": datetime.utcnow().isoformat(),
         }
         save_review_result(record)
 
-        msg = (
-            "📊 NBA复盘完成\n"
-            f"比赛ID: {record['game_id']}\n"
-            f"让分命中: {record['spread_hit']}\n"
-            f"大小分命中: {record['ou_hit']}\n"
-            f"最终比分: "
-            f"{record['final_home_score']}-"
-            f"{record['final_visitor_score']}"
+        message = build_review_message(
+            result, pred, spread_result, total_result
         )
         try:
-            send_message(msg)
+            send_message(message)
         except Exception:
             logger.debug("Telegram send failed for game %s", game_id)
 

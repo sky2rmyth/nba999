@@ -219,22 +219,29 @@ class TestReviewSafety:
         """Review generates review_latest.json when predictions exist."""
         predictions = [
             {
-                "game_id": 1, "spread": 5, "total_line": 220,
-                "recommended_side": "home", "recommended_total": "over",
-                "created_at": "2025-01-15T01:00:00",
+                "game_id": 1,
+                "spread_pick": "home",
+                "total_pick": "over",
+                "predicted_margin": 5.0,
+                "predicted_total": 215.0,
             },
+        ]
+        review_rows = [
+            {"game_id": 1, "spread_hit": True, "ou_hit": True},
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
             with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
                 mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
-                import os
-                old_cwd = os.getcwd()
-                os.chdir(tmp_path)
-                try:
-                    from app.review_engine import run_review
-                    run_review()
-                finally:
-                    os.chdir(old_cwd)
+                with mock.patch("app.supabase_client.save_review_result"):
+                    with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):
+                        import os
+                        old_cwd = os.getcwd()
+                        os.chdir(tmp_path)
+                        try:
+                            from app.review_engine import run_review
+                            run_review()
+                        finally:
+                            os.chdir(old_cwd)
 
         import json
         report = json.loads((tmp_path / "review_latest.json").read_text())
@@ -245,24 +252,52 @@ class TestReviewSafety:
     def test_review_uses_predictions(self):
         """Review loads predictions from predictions via load_latest_predictions."""
         with mock.patch("app.review_engine.load_latest_predictions", return_value=[]) as mock_load:
-            from app.review_engine import run_review
-            run_review()  # empty predictions should not crash
-            mock_load.assert_called_once()
+            with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=[]):
+                from app.review_engine import run_review
+                run_review()  # empty predictions should not crash
+                mock_load.assert_called_once()
 
-    def test_review_does_not_import_save_review_result(self):
-        """Review engine no longer depends on save_review_result."""
-        import inspect
-        from app import review_engine
-        source = inspect.getsource(review_engine)
-        assert "save_review_result" not in source
+    def test_review_writes_to_review_results(self):
+        """Review engine persists results via save_review_result."""
+        predictions = [
+            {
+                "game_id": 1,
+                "spread_pick": "home",
+                "total_pick": "over",
+                "predicted_margin": 5.0,
+                "predicted_total": 215.0,
+            },
+        ]
+        with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
+            with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
+                mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
+                with mock.patch("app.supabase_client.save_review_result") as mock_save:
+                    with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=[]):
+                        from app.review_engine import run_review
+                        run_review()
+                        mock_save.assert_called_once()
 
-    def test_review_does_not_query_review_results(self):
-        """Review engine no longer queries review_results table."""
-        import inspect
-        from app import review_engine
-        source = inspect.getsource(review_engine)
-        assert "review_results" not in source
-        assert "fetch_recent_review_results" not in source
+    def test_review_computes_rates_from_review_results(self):
+        """Hit rates are computed from review_results, not predictions."""
+        review_rows = [
+            {"game_id": 1, "spread_hit": True, "ou_hit": False},
+            {"game_id": 2, "spread_hit": False, "ou_hit": True},
+        ]
+        with mock.patch("app.review_engine.load_latest_predictions", return_value=[]):
+            with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):
+                from app.review_engine import run_review
+                import os, json, tempfile
+                with tempfile.TemporaryDirectory() as td:
+                    old_cwd = os.getcwd()
+                    os.chdir(td)
+                    try:
+                        run_review()
+                        report = json.loads(open("review_latest.json").read())
+                    finally:
+                        os.chdir(old_cwd)
+                assert report["games"] == 2
+                assert report["spread_hit_rate"] == 0.5
+                assert report["total_hit_rate"] == 0.5
 
 
 # ---------- Deduplication helper ----------

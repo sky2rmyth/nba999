@@ -62,6 +62,39 @@ def calculate_rates(rows: list[dict]) -> tuple[float, float, float]:
     return spread_rate, total_rate, overall_rate
 
 
+def parse_prediction(row: dict) -> dict:
+    """Extract prediction fields from a Supabase predictions row.
+
+    All prediction data lives inside ``payload.details``.  This function
+    normalises the nested structure into a flat dict suitable for the
+    review pipeline.
+    """
+    payload = row.get("payload", {})
+    details = payload.get("details", {})
+    sim = details.get("simulation", {})
+    total_rating = details.get("total_rating", {})
+
+    predicted_margin = sim.get("predicted_margin")
+    predicted_total = sim.get("predicted_total")
+
+    spread_pick = (
+        "home" if predicted_margin and predicted_margin > 0 else "away"
+    )
+
+    total_pick = (
+        "over" if predicted_total and total_rating.get("total_confidence", 0) > 50
+        else "under"
+    )
+
+    return {
+        "game_id": row["game_id"],
+        "spread_pick": spread_pick,
+        "total_pick": total_pick,
+        "predicted_margin": predicted_margin,
+        "predicted_total": predicted_total,
+    }
+
+
 def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
     """Keep only the latest prediction per game_id based on created_at."""
     latest: dict = {}
@@ -103,7 +136,7 @@ def load_latest_predictions() -> list[dict]:
         if gid not in latest:
             latest[gid] = r
 
-    return list(latest.values())
+    return [parse_prediction(r) for r in latest.values()]
 
 
 def fetch_game_result(game_id):
@@ -119,9 +152,9 @@ def fetch_game_result(game_id):
 
 
 def run_review() -> None:
-    predictions = load_latest_predictions()
+    from .supabase_client import save_review_result, fetch_recent_review_results
 
-    review_rows = []
+    predictions = load_latest_predictions()
 
     for p in predictions:
         result = fetch_game_result(p["game_id"])
@@ -132,31 +165,40 @@ def run_review() -> None:
         actual_margin = home - away
         actual_total = home + away
 
-        spread_hit = (
-            actual_margin > p["spread"]
+        s_hit = (
+            actual_margin > 0
             if p["spread_pick"] == "home"
-            else actual_margin < p["spread"]
+            else actual_margin < 0
         )
 
-        ou_hit = (
-            actual_total > p["total_line"]
-            if p["total_pick"] == "over"
-            else actual_total < p["total_line"]
-        )
+        predicted_total = p.get("predicted_total")
+        if predicted_total is not None:
+            o_hit = (
+                actual_total > predicted_total
+                if p["total_pick"] == "over"
+                else actual_total < predicted_total
+            )
+        else:
+            o_hit = False
 
-        review_rows.append({
+        save_review_result({
             "game_id": p["game_id"],
-            "spread_hit": spread_hit,
-            "ou_hit": ou_hit
+            "spread_pick": p["spread_pick"],
+            "total_pick": p["total_pick"],
+            "spread_hit": s_hit,
+            "ou_hit": o_hit,
+            "final_home_score": home,
+            "final_visitor_score": away,
         })
 
+    review_rows = fetch_recent_review_results()
     n = len(review_rows)
     if n == 0:
         print("Review completed. No games to review.")
         return
 
-    spread_rate = sum(r["spread_hit"] for r in review_rows) / n
-    total_rate = sum(r["ou_hit"] for r in review_rows) / n
+    spread_rate = sum(int(r["spread_hit"]) for r in review_rows) / n
+    total_rate = sum(int(r["ou_hit"]) for r in review_rows) / n
 
     report = {
         "games": n,

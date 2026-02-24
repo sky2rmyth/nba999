@@ -1,7 +1,104 @@
 """Tests for review_engine hit-checking and rate calculation functions."""
 from __future__ import annotations
 
-from app.review_engine import calculate_rates, spread_hit, total_hit
+from app.review_engine import calculate_rates, parse_prediction, spread_hit, total_hit
+
+
+# --- parse_prediction ---
+
+class TestParsePrediction:
+    def test_home_spread_pick(self):
+        """Positive predicted_margin yields spread_pick 'home'."""
+        row = {
+            "game_id": 1,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                    "total_rating": {"total_confidence": 60},
+                }
+            },
+        }
+        result = parse_prediction(row)
+        assert result["spread_pick"] == "home"
+
+    def test_away_spread_pick(self):
+        """Negative predicted_margin yields spread_pick 'away'."""
+        row = {
+            "game_id": 2,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": -3.0, "predicted_total": 210.0},
+                    "total_rating": {"total_confidence": 60},
+                }
+            },
+        }
+        result = parse_prediction(row)
+        assert result["spread_pick"] == "away"
+
+    def test_zero_margin_yields_away(self):
+        """Zero predicted_margin yields spread_pick 'away'."""
+        row = {
+            "game_id": 3,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 0, "predicted_total": 210.0},
+                    "total_rating": {"total_confidence": 60},
+                }
+            },
+        }
+        result = parse_prediction(row)
+        assert result["spread_pick"] == "away"
+
+    def test_over_total_pick(self):
+        """High total_confidence yields total_pick 'over'."""
+        row = {
+            "game_id": 4,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 2.0, "predicted_total": 220.0},
+                    "total_rating": {"total_confidence": 70},
+                }
+            },
+        }
+        result = parse_prediction(row)
+        assert result["total_pick"] == "over"
+
+    def test_under_total_pick(self):
+        """Low total_confidence yields total_pick 'under'."""
+        row = {
+            "game_id": 5,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 2.0, "predicted_total": 220.0},
+                    "total_rating": {"total_confidence": 30},
+                }
+            },
+        }
+        result = parse_prediction(row)
+        assert result["total_pick"] == "under"
+
+    def test_missing_payload_defaults(self):
+        """Missing payload falls back to 'away' and 'under'."""
+        row = {"game_id": 6, "payload": {}}
+        result = parse_prediction(row)
+        assert result["spread_pick"] == "away"
+        assert result["total_pick"] == "under"
+        assert result["predicted_margin"] is None
+        assert result["predicted_total"] is None
+
+    def test_returns_game_id(self):
+        """Returned dict contains game_id from input row."""
+        row = {
+            "game_id": 99,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 1.0, "predicted_total": 200.0},
+                    "total_rating": {"total_confidence": 55},
+                }
+            },
+        }
+        result = parse_prediction(row)
+        assert result["game_id"] == 99
 
 
 # --- spread_hit ---

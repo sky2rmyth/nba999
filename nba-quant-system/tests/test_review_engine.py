@@ -4,13 +4,16 @@ from __future__ import annotations
 from unittest.mock import patch, MagicMock
 
 from app.review_engine import (
+    TEAM_CN,
     build_review_message,
     build_review_summary,
     calc_spread_hit,
     calc_total_hit,
     calculate_rates,
+    cn,
     extract_prediction_fields,
     fetch_game_result,
+    format_review_message,
     format_spread_text,
     format_total_text,
     parse_prediction,
@@ -460,7 +463,12 @@ class TestRunReviewTelegram:
         mock_load.return_value = [
             {
                 "game_id": 42,
-                "payload": {"details": {"simulation": {"predicted_margin": 5.0, "predicted_total": 215.0}}},
+                "payload": {
+                    "details": {
+                        "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                        "market": {"closing_spread": -3.5, "closing_total": 220.5},
+                    }
+                },
             }
         ]
         mock_fetch.return_value = {
@@ -479,8 +487,8 @@ class TestRunReviewTelegram:
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
         assert "NBA复盘结果" in msg
-        assert "Los Angeles Lakers" in msg
-        assert "Golden State Warriors" in msg
+        assert "洛杉矶湖人" in msg
+        assert "金州勇士" in msg
         assert "110" in msg
         assert "100" in msg
         assert "命中" in msg or "未中" in msg
@@ -611,8 +619,8 @@ class TestBuildReviewSummary:
     def test_summary_with_data(self):
         """Summary includes rates and game count."""
         rows = [
-            {"spread_hit": True, "ou_hit": False, "reviewed_at": "2026-02-20T10:00:00Z"},
-            {"spread_hit": False, "ou_hit": True, "reviewed_at": "2026-02-21T10:00:00Z"},
+            {"spread_hit": True, "ou_hit": False, "reviewed_at": "2026-02-20T10:00:00+00:00"},
+            {"spread_hit": False, "ou_hit": True, "reviewed_at": "2026-02-21T10:00:00+00:00"},
         ]
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=rows)
@@ -624,10 +632,58 @@ class TestBuildReviewSummary:
     def test_summary_last30_section(self):
         """Recent rows appear in 30-day rolling section."""
         rows = [
-            {"spread_hit": True, "ou_hit": True, "reviewed_at": "2026-02-20T10:00:00"},
+            {"spread_hit": True, "ou_hit": True, "reviewed_at": "2026-02-20T10:00:00+00:00"},
         ]
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=rows)
         result = build_review_summary(mock_client)
         assert "近30天滚动表现" in result
         assert "样本数：1" in result
+
+
+# --- cn (team name translation) ---
+
+class TestCn:
+    def test_known_team(self):
+        """Known team returns Chinese name."""
+        assert cn("Los Angeles Lakers") == "洛杉矶湖人"
+
+    def test_unknown_team(self):
+        """Unknown team returns original name."""
+        assert cn("Unknown Team") == "Unknown Team"
+
+    def test_all_30_teams(self):
+        """TEAM_CN contains all 30 NBA teams (plus LA Clippers alias)."""
+        assert len(TEAM_CN) == 31
+
+
+# --- format_review_message ---
+
+class TestFormatReviewMessage:
+    def test_message_contains_chinese_teams(self):
+        """format_review_message uses Chinese team names."""
+        game = {
+            "home_team": "Los Angeles Lakers",
+            "visitor_team": "Golden State Warriors",
+        }
+        pred = {"spread_pick": "home", "total_pick": "over"}
+        record = {
+            "spread_line": -3.5,
+            "total_line": 220.5,
+            "spread_hit": True,
+            "ou_hit": False,
+            "final_home_score": 113,
+            "final_visitor_score": 103,
+        }
+        msg = format_review_message(game, pred, record)
+        assert "洛杉矶湖人" in msg
+        assert "金州勇士" in msg
+        assert "NBA复盘结果" in msg
+        assert "-3.5" in msg
+        assert "220.5" in msg
+        assert "✅命中" in msg
+        assert "❌未中" in msg
+        assert "113" in msg
+        assert "103" in msg
+        assert "True" not in msg
+        assert "False" not in msg

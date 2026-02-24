@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -14,6 +14,44 @@ logger = logging.getLogger(__name__)
 
 BALLDONTLIE = "https://api.balldontlie.io/v1"
 API_KEY = os.getenv("BALLDONTLIE_API_KEY", "")
+
+TEAM_CN = {
+    "Atlanta Hawks": "亚特兰大老鹰",
+    "Boston Celtics": "波士顿凯尔特人",
+    "Brooklyn Nets": "布鲁克林篮网",
+    "Charlotte Hornets": "夏洛特黄蜂",
+    "Chicago Bulls": "芝加哥公牛",
+    "Cleveland Cavaliers": "克里夫兰骑士",
+    "Dallas Mavericks": "达拉斯独行侠",
+    "Denver Nuggets": "丹佛掘金",
+    "Detroit Pistons": "底特律活塞",
+    "Golden State Warriors": "金州勇士",
+    "Houston Rockets": "休斯顿火箭",
+    "Indiana Pacers": "印第安纳步行者",
+    "LA Clippers": "洛杉矶快船",
+    "Los Angeles Clippers": "洛杉矶快船",
+    "Los Angeles Lakers": "洛杉矶湖人",
+    "Memphis Grizzlies": "孟菲斯灰熊",
+    "Miami Heat": "迈阿密热火",
+    "Milwaukee Bucks": "密尔沃基雄鹿",
+    "Minnesota Timberwolves": "明尼苏达森林狼",
+    "New Orleans Pelicans": "新奥尔良鹈鹕",
+    "New York Knicks": "纽约尼克斯",
+    "Oklahoma City Thunder": "俄克拉荷马雷霆",
+    "Orlando Magic": "奥兰多魔术",
+    "Philadelphia 76ers": "费城76人",
+    "Phoenix Suns": "菲尼克斯太阳",
+    "Portland Trail Blazers": "波特兰开拓者",
+    "Sacramento Kings": "萨克拉门托国王",
+    "San Antonio Spurs": "圣安东尼奥马刺",
+    "Toronto Raptors": "多伦多猛龙",
+    "Utah Jazz": "犹他爵士",
+    "Washington Wizards": "华盛顿奇才",
+}
+
+
+def cn(team):
+    return TEAM_CN.get(team, team)
 
 
 def spread_hit(row: dict) -> bool:
@@ -130,6 +168,43 @@ def build_review_message(result, pred, spread_result, total_result):
         f"{score}"
     )
     return message
+
+
+def format_review_message(game, pred, record):
+    """Build Chinese Telegram review message using team name mapping."""
+    home = cn(game["home_team"])
+    away = cn(game["visitor_team"])
+
+    spread_result = "✅命中" if record["spread_hit"] else "❌未中"
+    total_result = "✅命中" if record["ou_hit"] else "❌未中"
+
+    return (
+        "📊 NBA复盘结果\n"
+        "\n"
+        "🏀 对阵：\n"
+        f"{away} vs {home}\n"
+        "\n"
+        "📉 让分盘口：\n"
+        f"{record['spread_line']}\n"
+        "\n"
+        "模型推荐：\n"
+        f"{pred['spread_pick']}\n"
+        "\n"
+        "结果：\n"
+        f"{spread_result}\n"
+        "\n"
+        "📈 大小分盘口：\n"
+        f"{record['total_line']}\n"
+        "\n"
+        "模型推荐：\n"
+        f"{pred['total_pick']}\n"
+        "\n"
+        "结果：\n"
+        f"{total_result}\n"
+        "\n"
+        "🏁 最终比分：\n"
+        f"{record['final_home_score']}-{record['final_visitor_score']}"
+    )
 
 
 def calculate_rates(rows: list[dict]) -> tuple[float, float, float]:
@@ -294,6 +369,10 @@ def run_review() -> None:
             print("NO RESULT FOUND:", game_id)
             continue
 
+        market = p.get("payload", {}).get("details", {}).get("market", {})
+        spread_line = market.get("closing_spread", 0)
+        total_line = market.get("closing_total", 0)
+
         final_home = result["home_score"]
         final_visitor = result["visitor_score"]
 
@@ -303,33 +382,33 @@ def run_review() -> None:
             result.get("visitor_team", ""),
             final_home,
             final_visitor,
-            result["spread"]
+            spread_line,
         )
 
         total_result = calc_total_hit(
             pred["total_pick"],
             final_home,
             final_visitor,
-            result["total"]
+            total_line,
         )
 
         record = {
             "game_id": game_id,
             "spread_pick": pred["spread_pick"],
             "total_pick": pred["total_pick"],
+            "spread_line": spread_line,
+            "total_line": total_line,
             "spread_hit": spread_result,
             "ou_hit": total_result,
             "final_home_score": final_home,
             "final_visitor_score": final_visitor,
-            "reviewed_at": datetime.utcnow().isoformat(),
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
         }
         save_review_result(record)
 
-        message = build_review_message(
-            result, pred, spread_result, total_result
-        )
+        msg = format_review_message(result, pred, record)
         try:
-            send_message(message)
+            send_message(msg)
         except Exception:
             logger.debug("Telegram send failed for game %s", game_id)
 
@@ -441,13 +520,13 @@ def build_review_summary(client):
     total_rate = total_hits / total_games * 100
     overall_rate = (spread_rate + total_rate) / 2
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=30)
 
     last30 = []
 
     for r in rows:
-        t = datetime.fromisoformat(r["reviewed_at"].replace("Z", ""))
+        t = datetime.fromisoformat(r["reviewed_at"])
         if t >= cutoff:
             last30.append(r)
 

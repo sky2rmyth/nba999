@@ -75,7 +75,8 @@ class BallDontLieClient:
         headers = {"Authorization": self.api_key}
         resp = requests.get(url, headers=headers, timeout=self.timeout)
         resp.raise_for_status()
-        return resp.json().get("data", resp.json())
+        body = resp.json()
+        return body.get("data", body)
 
     def games(self, **params: Any) -> list[dict[str, Any]]:
         return self.fetch_all_pages("games", params)

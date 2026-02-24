@@ -231,7 +231,7 @@ class TestReviewSafety:
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
             with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
-                mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
+                mock_fetch.return_value = {"home_team": "Team A", "visitor_team": "Team B", "home_score": 110, "visitor_score": 105, "spread": 0, "total": 0}
                 with mock.patch("app.supabase_client.save_review_result"):
                     with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):
                         import os
@@ -270,7 +270,7 @@ class TestReviewSafety:
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
             with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
-                mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
+                mock_fetch.return_value = {"home_team": "Team A", "visitor_team": "Team B", "home_score": 110, "visitor_score": 105, "spread": 0, "total": 0}
                 with mock.patch("app.supabase_client.save_review_result") as mock_save:
                     with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=[]):
                         from app.review_engine import run_review

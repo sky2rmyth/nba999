@@ -78,11 +78,11 @@ def parse_prediction(row: dict) -> dict:
     predicted_total = sim.get("predicted_total")
 
     spread_pick = (
-        "home" if predicted_margin and predicted_margin > 0 else "away"
+        "home" if predicted_margin is not None and predicted_margin > 0 else "away"
     )
 
     total_pick = (
-        "over" if predicted_total and total_rating.get("total_confidence", 0) > 50
+        "over" if predicted_total is not None and total_rating.get("total_confidence", 0) > 50
         else "under"
     )
 

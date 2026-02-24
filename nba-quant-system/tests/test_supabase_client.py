@@ -209,7 +209,7 @@ def test_save_training_log_uses_payload_jsonb():
 def test_save_review_result_does_not_raise_on_failure():
     """save_review_result swallows exceptions so the workflow never crashes."""
     fake_client = mock.MagicMock()
-    fake_client.table.return_value.insert.return_value.execute.side_effect = RuntimeError("fail")
+    fake_client.table.return_value.upsert.return_value.execute.side_effect = RuntimeError("fail")
     # Column discovery returns no data (empty table)
     fake_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock.MagicMock(data=[])
     supabase_client._client = fake_client
@@ -243,13 +243,15 @@ def test_save_review_result_includes_fields():
         "final_visitor_score": 108,
     })
 
-    inserted = fake_client.table.return_value.insert.call_args[0][0]
-    assert inserted["game_id"] == 42
-    assert inserted["game_date"] == "2025-01-15"
-    assert inserted["spread_correct"] is True
-    assert inserted["total_correct"] is False
-    assert inserted["final_home_score"] == 112
-    assert "reviewed_at" in inserted
+    upserted = fake_client.table.return_value.upsert.call_args[0][0]
+    assert upserted["game_id"] == 42
+    assert upserted["game_date"] == "2025-01-15"
+    assert upserted["spread_correct"] is True
+    assert upserted["total_correct"] is False
+    assert upserted["final_home_score"] == 112
+    assert "reviewed_at" in upserted
+    # Verify on_conflict is set to game_id
+    assert fake_client.table.return_value.upsert.call_args[1]["on_conflict"] == "game_id"
 
 
 def test_save_review_result_skips_when_not_configured():
@@ -275,14 +277,14 @@ def test_save_review_result_filters_unknown_columns():
         "unknown_field": "ignored",
     })
 
-    inserted = fake_client.table.return_value.insert.call_args[0][0]
-    assert inserted["game_id"] == 42
-    assert "reviewed_at" in inserted
+    upserted = fake_client.table.return_value.upsert.call_args[0][0]
+    assert upserted["game_id"] == 42
+    assert "reviewed_at" in upserted
     # Fields not in the DB columns should be excluded
-    assert "home_team" not in inserted
-    assert "away_team" not in inserted
-    assert "spread_correct" not in inserted
-    assert "unknown_field" not in inserted
+    assert "home_team" not in upserted
+    assert "away_team" not in upserted
+    assert "spread_correct" not in upserted
+    assert "unknown_field" not in upserted
 
 
 def test_save_review_result_passes_all_when_columns_unknown():
@@ -300,11 +302,11 @@ def test_save_review_result_passes_all_when_columns_unknown():
         "extra_field": "kept",
     })
 
-    inserted = fake_client.table.return_value.insert.call_args[0][0]
-    assert inserted["game_id"] == 42
-    assert inserted["home_team"] == "Lakers"
-    assert inserted["extra_field"] == "kept"
-    assert "reviewed_at" in inserted
+    upserted = fake_client.table.return_value.upsert.call_args[0][0]
+    assert upserted["game_id"] == 42
+    assert upserted["home_team"] == "Lakers"
+    assert upserted["extra_field"] == "kept"
+    assert "reviewed_at" in upserted
 
 
 # --- upload_models_to_storage ---

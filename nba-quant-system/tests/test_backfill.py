@@ -27,7 +27,7 @@ def _reset_client():
 class TestFetchAllPredictions:
     def test_returns_all_rows(self):
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.return_value.data = [
+        fake_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
             {"id": 1, "game_id": 100, "payload": {}, "game_date": None},
             {"id": 2, "game_id": 200, "payload": {}, "game_date": "2025-01-15"},
         ]
@@ -45,7 +45,7 @@ class TestFetchAllPredictions:
 
     def test_returns_empty_on_error(self):
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.side_effect = RuntimeError("fail")
+        fake_client.table.return_value.select.return_value.order.return_value.execute.side_effect = RuntimeError("fail")
         supabase_client._client = fake_client
         supabase_client._available = True
         assert supabase_client.fetch_all_predictions() == []
@@ -116,7 +116,7 @@ class TestBackfillReviewGames:
     def test_backfill_updates_missing_game_date(self):
         """Predictions with game_date=None get updated from API."""
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.return_value.data = [
+        fake_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
             {"id": 1, "game_id": 42, "payload": {}, "game_date": None},
         ]
         supabase_client._client = fake_client
@@ -148,7 +148,7 @@ class TestBackfillReviewGames:
     def test_backfill_skips_update_when_game_date_exists(self):
         """Predictions with existing game_date are not updated."""
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.return_value.data = [
+        fake_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
             {"id": 1, "game_id": 42, "payload": {}, "game_date": "2025-01-15"},
         ]
         supabase_client._client = fake_client
@@ -182,7 +182,7 @@ class TestBackfillReviewGames:
     def test_backfill_excludes_non_final_games(self):
         """Only Final games are returned."""
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.return_value.data = [
+        fake_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
             {"id": 1, "game_id": 42, "payload": {}, "game_date": "2025-01-15"},
         ]
         supabase_client._client = fake_client
@@ -218,7 +218,7 @@ class TestBackfillReviewGames:
     def test_backfill_continues_on_api_error(self):
         """API errors for individual games don't crash the backfill."""
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.return_value.data = [
+        fake_client.table.return_value.select.return_value.order.return_value.execute.return_value.data = [
             {"id": 1, "game_id": 42, "payload": {}, "game_date": None},
             {"id": 2, "game_id": 43, "payload": {}, "game_date": None},
         ]

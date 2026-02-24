@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
@@ -351,6 +351,12 @@ def run_review() -> None:
     with open("review_latest.json", "w") as f:
         json.dump(report, f, indent=2)
 
+    from .supabase_client import _get_client
+    client = _get_client()
+    if client is not None:
+        summary = build_review_summary(client)
+        send_message(summary)
+
     print("Review completed.")
 
 
@@ -416,6 +422,58 @@ def backfill_review_games() -> list[dict]:
 
     logger.info("backfill: processed %d predictions, %d final games", len(predictions), len(final_games))
     return final_games
+
+
+def build_review_summary(client):
+    """Build a Chinese-language summary report from all review results."""
+    res = client.table("review_results").select("*").execute()
+    rows = res.data or []
+
+    total_games = len(rows)
+
+    if total_games == 0:
+        return "暂无复盘数据"
+
+    spread_hits = sum(1 for r in rows if r["spread_hit"])
+    total_hits = sum(1 for r in rows if r["ou_hit"])
+
+    spread_rate = spread_hits / total_games * 100
+    total_rate = total_hits / total_games * 100
+    overall_rate = (spread_rate + total_rate) / 2
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=30)
+
+    last30 = []
+
+    for r in rows:
+        t = datetime.fromisoformat(r["reviewed_at"].replace("Z", ""))
+        if t >= cutoff:
+            last30.append(r)
+
+    if len(last30) > 0:
+        s30 = sum(1 for r in last30 if r["spread_hit"])
+        t30 = sum(1 for r in last30 if r["ou_hit"])
+
+        spread30 = s30 / len(last30) * 100
+        total30 = t30 / len(last30) * 100
+    else:
+        spread30 = 0
+        total30 = 0
+
+    return f"""📊 复盘报告
+
+让分命中率：{spread_rate:.1f}%
+大小命中率：{total_rate:.1f}%
+综合胜率：{overall_rate:.1f}%
+复盘场次：{total_games}
+
+━━━━━━━━━━━━━━━━
+📈 近30天滚动表现
+让分命中率：{spread30:.1f}%
+大小命中率：{total30:.1f}%
+样本数：{len(last30)}
+"""
 
 
 if __name__ == "__main__":

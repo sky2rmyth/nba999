@@ -190,7 +190,7 @@ def fetch_recent_review_results(days: int = 30) -> list[dict[str, Any]]:
         )
         return resp.data or []
     except Exception:
-        logger.debug("Supabase: could not fetch recent review results")
+        logger.debug("Supabase: could not fetch recent review results", exc_info=True)
     return []
 
 

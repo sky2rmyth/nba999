@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 
 from .api_client import BallDontLieClient
-from .database import get_conn
 from .i18n_cn import cn
 from .rating_engine import is_spread_correct, is_total_correct
 from .retrain_engine import ensure_models
@@ -14,38 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 def _rolling_performance(days: int = 30) -> dict:
-    """Compute rolling N-day performance metrics."""
-    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT p.spread_pick, p.total_pick, p.live_spread, p.live_total,
-                   r.final_home_score, r.final_visitor_score, p.snapshot_date
-            FROM predictions_snapshot p
-            JOIN results r ON p.game_id = r.game_id
-            WHERE p.snapshot_date >= ? AND p.is_final_prediction = 1
-            ORDER BY p.snapshot_date DESC
-            """,
-            (cutoff,),
-        ).fetchall()
+    """Compute rolling N-day performance metrics from Supabase review_results."""
+    from .supabase_client import fetch_recent_review_results
+
+    rows = fetch_recent_review_results(days)
 
     if not rows:
         return {"spread_rate": 0.0, "total_rate": 0.0, "roi": 0.0, "count": 0}
 
-    spread_hits = 0
-    total_hits = 0
-    total_bets = 0
-    for r in rows:
-        margin = r["final_home_score"] - r["final_visitor_score"]
-        total_pts = r["final_home_score"] + r["final_visitor_score"]
-        if r["live_spread"] is not None:
-            spread_hits += int(is_spread_correct(r["spread_pick"], margin, r["live_spread"]))
-            total_bets += 1
-        if r["live_total"] is not None:
-            total_hits += int(is_total_correct(r["total_pick"], total_pts, r["live_total"]))
-            total_bets += 1
-
+    spread_hits = sum(1 for r in rows if r.get("spread_correct"))
+    total_hits = sum(1 for r in rows if r.get("total_correct"))
     count = len(rows)
+    total_bets = count * 2
+
     spread_rate = spread_hits / max(count, 1)
     total_rate = total_hits / max(count, 1)
     roi = ((spread_hits + total_hits) / max(total_bets, 1)) * 2 - 1

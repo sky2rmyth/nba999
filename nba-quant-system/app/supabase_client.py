@@ -2,13 +2,13 @@
 
 If SUPABASE_URL and SUPABASE_KEY are set, data is persisted to Supabase.
 When configured, write failures raise exceptions so the workflow fails loudly.
-If credentials are not set, calls are skipped (SQLite acts as local cache).
+If credentials are not set, calls are silently skipped.
 """
 from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,28 @@ def save_review_result(row: dict[str, Any]) -> None:
         logger.info("Supabase: review result saved for game %s", row.get("game_id"))
     except Exception:
         logger.exception("Supabase: failed to save review result for game %s — continuing", row.get("game_id"))
+
+
+def fetch_recent_review_results(days: int = 30) -> list[dict[str, Any]]:
+    """Fetch review results from the last *days* days from Supabase.
+
+    Returns a list of review result dicts or an empty list.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        resp = (
+            client.table("review_results")
+            .select("*")
+            .gte("reviewed_at", cutoff)
+            .execute()
+        )
+        return resp.data or []
+    except Exception:
+        logger.debug("Supabase: could not fetch recent review results", exc_info=True)
+    return []
 
 
 def fetch_latest_training_metrics() -> dict[str, Any] | None:

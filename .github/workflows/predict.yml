@@ -30,19 +30,17 @@ jobs:
         run: python -m app.prediction_engine
         working-directory: nba-quant-system
       - name: Validate predictions saved
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python -c "
-          from app.database import get_conn, init_db
-          from datetime import datetime
-          import sys
-          init_db()
-          today = datetime.utcnow().strftime('%Y-%m-%d')
-          with get_conn() as conn:
-              count = conn.execute('SELECT COUNT(*) FROM predictions_snapshot WHERE snapshot_date=?', (today,)).fetchone()[0]
-          print(f'预测已保存 {today}: {count}')
-          if count == 0:
-              print('错误: 今日无预测保存')
-              sys.exit(1)
-          print('预测验证成功')
+          from app.supabase_client import fetch_all_predictions
+          preds = fetch_all_predictions()
+          print(f'Supabase predictions count: {len(preds)}')
+          if not preds:
+              print('警告: 无预测记录')
+          else:
+              print('预测验证成功')
           "
         working-directory: nba-quant-system

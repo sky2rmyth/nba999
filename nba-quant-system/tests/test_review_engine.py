@@ -1,9 +1,12 @@
 """Tests for review_engine hit-checking and rate calculation functions."""
 from __future__ import annotations
 
+from unittest.mock import patch, MagicMock
+
 from app.review_engine import (
     calculate_rates,
     extract_prediction_fields,
+    fetch_game_result,
     parse_prediction,
     spread_hit,
     total_hit,
@@ -374,3 +377,44 @@ class TestExtractPredictionFields:
         result = extract_prediction_fields(row)
         assert isinstance(result, tuple)
         assert len(result) == 2
+
+
+# --- fetch_game_result ---
+
+class TestFetchGameResult:
+    @patch("app.review_engine.requests.get")
+    def test_successful_fetch(self, mock_get):
+        """Successful API call returns scores dict with spread and total."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "resultSets": [
+                {}, {}, {}, {}, {},
+                {"rowSet": [
+                    [None] * 22 + [98],   # visitor score at index 22
+                    [None] * 22 + [105],  # home score at index 22
+                ]},
+            ]
+        }
+        mock_get.return_value = mock_resp
+        result = fetch_game_result("0022400001")
+        assert result["home_score"] == 105
+        assert result["visitor_score"] == 98
+        assert result["spread"] == 0
+        assert result["total"] == 203
+
+    @patch("app.review_engine.requests.get")
+    def test_api_non_200_returns_none(self, mock_get):
+        """Non-200 status code returns None."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        mock_get.return_value = mock_resp
+        result = fetch_game_result("0022400001")
+        assert result is None
+
+    @patch("app.review_engine.requests.get")
+    def test_api_exception_returns_none(self, mock_get):
+        """Network error returns None."""
+        mock_get.side_effect = Exception("timeout")
+        result = fetch_game_result("0022400001")
+        assert result is None

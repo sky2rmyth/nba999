@@ -153,15 +153,39 @@ def load_latest_predictions() -> list[dict]:
 
 
 def fetch_game_result(game_id):
-    """Fetch final scores for a game from the BallDontLie API."""
-    url = f"https://api.balldontlie.io/v1/games/{game_id}"
-    headers = {"Authorization": BALLDONTLIE_API_KEY}
-    r = requests.get(url, headers=headers)
-    g = r.json()["data"]
-    return {
-        "home_score": g["home_team_score"],
-        "visitor_score": g["visitor_team_score"]
+    """Fetch final scores for a game from the NBA stats API."""
+    url = f"https://stats.nba.com/stats/boxscoresummaryv2?GameID={game_id}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.nba.com/",
+        "Accept": "application/json"
     }
+
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+
+        if r.status_code != 200:
+            print("API FAIL:", game_id, r.status_code)
+            return None
+
+        data = r.json()
+
+        # LineScore dataset
+        lines = data["resultSets"][5]["rowSet"]
+
+        visitor_score = int(lines[0][22])
+        home_score = int(lines[1][22])
+
+        return {
+            "home_score": home_score,
+            "visitor_score": visitor_score,
+            "spread": 0,
+            "total": home_score + visitor_score
+        }
+
+    except Exception as e:
+        print("RESULT PARSE ERROR:", e)
+        return None
 
 
 def run_review() -> None:
@@ -174,6 +198,11 @@ def run_review() -> None:
         spread_pick, total_pick = extract_prediction_fields(p)
 
         result = fetch_game_result(game_id)
+        print("GAME RESULT:", game_id, result)
+
+        if not result:
+            print("NO RESULT FOUND:", game_id)
+            continue
 
         home = result["home_score"]
         away = result["visitor_score"]

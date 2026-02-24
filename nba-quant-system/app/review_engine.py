@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import requests
 
 from .api_client import BallDontLieClient
+from .supabase_client import ensure_review_schema, save_review_result
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,42 @@ def parse_prediction(row: dict) -> dict:
     }
 
 
+def extract_prediction_fields(row: dict) -> dict:
+    """Extract prediction fields from a raw Supabase predictions row.
+
+    Similar to ``parse_prediction`` but also extracts ``expected_home_score``
+    and ``expected_visitor_score`` from the simulation data.
+    """
+    payload = row.get("payload", {})
+    details = payload.get("details", {})
+    sim = details.get("simulation", {})
+    total_rating = details.get("total_rating", {})
+
+    predicted_margin = sim.get("predicted_margin")
+    predicted_total = sim.get("predicted_total")
+
+    home_score = sim.get("expected_home_score")
+    visitor_score = sim.get("expected_visitor_score")
+
+    spread_pick = (
+        "home" if predicted_margin is not None and predicted_margin > 0 else "away"
+    )
+
+    total_pick = (
+        "over" if predicted_total is not None and total_rating.get("total_confidence", 0) > 50
+        else "under"
+    )
+
+    return {
+        "spread_pick": spread_pick,
+        "total_pick": total_pick,
+        "predicted_margin": predicted_margin,
+        "predicted_total": predicted_total,
+        "expected_home_score": home_score,
+        "expected_visitor_score": visitor_score,
+    }
+
+
 def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
     """Keep only the latest prediction per game_id based on created_at."""
     latest: dict = {}
@@ -109,7 +147,11 @@ def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
 
 
 def load_latest_predictions() -> list[dict]:
-    """Load the latest prediction per game from Supabase predictions."""
+    """Load the latest prediction per game from Supabase predictions.
+
+    Returns raw rows (not parsed) so callers can use ``extract_prediction_fields``
+    or ``parse_prediction`` as needed.
+    """
     from .supabase_client import _get_client
 
     client = _get_client()
@@ -122,42 +164,57 @@ def load_latest_predictions() -> list[dict]:
         .execute()
 
     if not res.data:
-        raise Exception("No predictions found")
-
-    print("==== SAMPLE PREDICTION ROW ====")
-    print(res.data[0])
-    print("================================")
-
-    rows = res.data
+        logger.warning("No predictions found in Supabase")
+        return []
 
     latest: dict = {}
-    for r in rows:
+    for r in res.data:
         gid = r["game_id"]
         if gid not in latest:
             latest[gid] = r
 
-    return [parse_prediction(r) for r in latest.values()]
+    return list(latest.values())
 
 
 def fetch_game_result(game_id):
-    """Fetch final scores for a game from the BallDontLie API."""
-    url = f"https://api.balldontlie.io/v1/games/{game_id}"
-    headers = {"Authorization": BALLDONTLIE_API_KEY}
-    r = requests.get(url, headers=headers)
-    g = r.json()["data"]
-    return {
-        "home_score": g["home_team_score"],
-        "visitor_score": g["visitor_team_score"]
-    }
+    """Fetch final scores for a game from the BallDontLie API.
+
+    Returns a dict with ``home_score`` and ``visitor_score``, or ``None``
+    if the request fails.
+    """
+    try:
+        url = f"https://api.balldontlie.io/v1/games/{game_id}"
+        headers = {"Authorization": BALLDONTLIE_API_KEY}
+        r = requests.get(url, headers=headers)
+        r.raise_for_status()
+        g = r.json()["data"]
+        return {
+            "home_score": g["home_team_score"],
+            "visitor_score": g["visitor_team_score"],
+        }
+    except Exception:
+        logger.warning("Could not fetch game result for game_id=%s", game_id)
+        return None
 
 
 def run_review() -> None:
-    from .supabase_client import save_review_result, fetch_recent_review_results
+    from .supabase_client import fetch_recent_review_results
+
+    ensure_review_schema()
 
     predictions = load_latest_predictions()
 
+    if not predictions:
+        print("No predictions to review.")
+        return
+
     for p in predictions:
-        result = fetch_game_result(p["game_id"])
+        pred = extract_prediction_fields(p)
+        game_id = p["game_id"]
+
+        result = fetch_game_result(game_id)
+        if not result:
+            continue
 
         home = result["home_score"]
         away = result["visitor_score"]
@@ -167,28 +224,29 @@ def run_review() -> None:
 
         s_hit = (
             actual_margin > 0
-            if p["spread_pick"] == "home"
+            if pred["spread_pick"] == "home"
             else actual_margin < 0
         )
 
-        predicted_total = p.get("predicted_total")
+        predicted_total = pred.get("predicted_total")
         if predicted_total is not None:
             o_hit = (
                 actual_total > predicted_total
-                if p["total_pick"] == "over"
+                if pred["total_pick"] == "over"
                 else actual_total < predicted_total
             )
         else:
             o_hit = False
 
         save_review_result({
-            "game_id": p["game_id"],
-            "spread_pick": p["spread_pick"],
-            "total_pick": p["total_pick"],
+            "game_id": game_id,
+            "spread_pick": pred["spread_pick"],
+            "total_pick": pred["total_pick"],
             "spread_hit": s_hit,
             "ou_hit": o_hit,
             "final_home_score": home,
             "final_visitor_score": away,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
         })
 
     review_rows = fetch_recent_review_results()

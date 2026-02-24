@@ -344,6 +344,52 @@ def upload_models_to_storage(model_dir: str | os.PathLike) -> bool:
     return success
 
 
+def ensure_review_schema() -> None:
+    """Ensure the review_results table has all required columns.
+
+    Queries the table for existing columns and attempts to add any missing
+    required columns via an ``execute_sql`` RPC call.  This is a best-effort
+    operation — failures are logged but never crash the workflow.
+    """
+    client = _get_client()
+    if client is None:
+        return
+
+    required_columns = {
+        "game_id": "text",
+        "spread_pick": "text",
+        "total_pick": "text",
+        "spread_hit": "bool",
+        "ou_hit": "bool",
+        "final_home_score": "int8",
+        "final_visitor_score": "int8",
+        "reviewed_at": "timestamptz",
+    }
+
+    try:
+        res = client.table("review_results").select("*").limit(1).execute()
+        existing = set(res.data[0].keys()) if res.data else set()
+    except Exception:
+        logger.warning("review_results table not accessible — skipping schema check")
+        return
+
+    for col, col_type in required_columns.items():
+        if col not in existing:
+            try:
+                client.rpc(
+                    "execute_sql",
+                    {
+                        "sql": (
+                            "ALTER TABLE review_results"
+                            f" ADD COLUMN IF NOT EXISTS {col} {col_type};"
+                        )
+                    },
+                ).execute()
+                logger.info("Added column '%s' to review_results", col)
+            except Exception as exc:
+                logger.warning("Schema fix failed for column '%s': %s", col, exc)
+
+
 def download_models_from_storage(model_dir: str | os.PathLike) -> bool:
     """Download model files from Supabase Storage bucket.
 

@@ -1,7 +1,13 @@
 """Tests for review_engine hit-checking and rate calculation functions."""
 from __future__ import annotations
 
-from app.review_engine import calculate_rates, parse_prediction, spread_hit, total_hit
+from app.review_engine import (
+    calculate_rates,
+    extract_prediction_fields,
+    parse_prediction,
+    spread_hit,
+    total_hit,
+)
 
 
 # --- parse_prediction ---
@@ -278,3 +284,91 @@ class TestCalculateRates:
         assert s == 1.0
         assert t == 0.0
         assert o == 0.5
+
+
+# --- extract_prediction_fields ---
+
+class TestExtractPredictionFields:
+    def test_home_spread_pick(self):
+        """Positive predicted_margin yields spread_pick 'home'."""
+        row = {
+            "game_id": 1,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0,
+                                   "expected_home_score": 112, "expected_visitor_score": 107},
+                    "total_rating": {"total_confidence": 60},
+                }
+            },
+        }
+        result = extract_prediction_fields(row)
+        assert result["spread_pick"] == "home"
+        assert result["expected_home_score"] == 112
+        assert result["expected_visitor_score"] == 107
+
+    def test_away_spread_pick(self):
+        """Negative predicted_margin yields spread_pick 'away'."""
+        row = {
+            "game_id": 2,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": -3.0, "predicted_total": 210.0},
+                    "total_rating": {"total_confidence": 60},
+                }
+            },
+        }
+        result = extract_prediction_fields(row)
+        assert result["spread_pick"] == "away"
+
+    def test_over_total_pick(self):
+        """High total_confidence yields total_pick 'over'."""
+        row = {
+            "game_id": 4,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 2.0, "predicted_total": 220.0},
+                    "total_rating": {"total_confidence": 70},
+                }
+            },
+        }
+        result = extract_prediction_fields(row)
+        assert result["total_pick"] == "over"
+
+    def test_under_total_pick(self):
+        """Low total_confidence yields total_pick 'under'."""
+        row = {
+            "game_id": 5,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 2.0, "predicted_total": 220.0},
+                    "total_rating": {"total_confidence": 30},
+                }
+            },
+        }
+        result = extract_prediction_fields(row)
+        assert result["total_pick"] == "under"
+
+    def test_missing_payload_defaults(self):
+        """Missing payload falls back to 'away' and 'under'."""
+        row = {"game_id": 6, "payload": {}}
+        result = extract_prediction_fields(row)
+        assert result["spread_pick"] == "away"
+        assert result["total_pick"] == "under"
+        assert result["predicted_margin"] is None
+        assert result["predicted_total"] is None
+        assert result["expected_home_score"] is None
+        assert result["expected_visitor_score"] is None
+
+    def test_does_not_include_game_id(self):
+        """extract_prediction_fields does not include game_id in output."""
+        row = {
+            "game_id": 99,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 1.0, "predicted_total": 200.0},
+                    "total_rating": {"total_confidence": 55},
+                }
+            },
+        }
+        result = extract_prediction_fields(row)
+        assert "game_id" not in result

@@ -144,6 +144,10 @@ def run_review() -> None:
         })
 
     n = len(review_rows)
+    if n == 0:
+        print("Review completed. No games to review.")
+        return
+
     spread_rate = sum(r["spread_hit"] for r in review_rows) / n
     total_rate = sum(r["ou_hit"] for r in review_rows) / n
 

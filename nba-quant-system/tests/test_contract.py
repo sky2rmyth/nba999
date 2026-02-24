@@ -246,11 +246,7 @@ class TestReviewSafety:
         """Review loads predictions from predictions_snapshot via load_latest_predictions."""
         with mock.patch("app.review_engine.load_latest_predictions", return_value=[]) as mock_load:
             from app.review_engine import run_review
-            # Empty predictions → ZeroDivisionError is expected; we only check the call
-            try:
-                run_review()
-            except ZeroDivisionError:
-                pass
+            run_review()  # empty predictions should not crash
             mock_load.assert_called_once()
 
     def test_review_does_not_import_save_review_result(self):

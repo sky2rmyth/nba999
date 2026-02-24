@@ -242,8 +242,8 @@ class TestReviewSafety:
         assert "spread_hit_rate" in report
         assert "total_hit_rate" in report
 
-    def test_review_uses_predictions_snapshot(self):
-        """Review loads predictions from predictions_snapshot via load_latest_predictions."""
+    def test_review_uses_predictions(self):
+        """Review loads predictions from predictions via load_latest_predictions."""
         with mock.patch("app.review_engine.load_latest_predictions", return_value=[]) as mock_load:
             from app.review_engine import run_review
             run_review()  # empty predictions should not crash

@@ -76,14 +76,14 @@ def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
 
 
 def load_latest_predictions() -> list[dict]:
-    """Load the latest prediction per game from Supabase predictions_snapshot."""
+    """Load the latest prediction per game from Supabase predictions."""
     from .supabase_client import _get_client
 
     client = _get_client()
     if client is None:
         return []
 
-    res = client.table("predictions_snapshot") \
+    res = client.table("predictions") \
         .select("*") \
         .order("created_at", desc=True) \
         .execute()

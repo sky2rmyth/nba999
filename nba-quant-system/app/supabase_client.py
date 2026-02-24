@@ -114,7 +114,7 @@ def adaptive_upsert(
         filtered = record
 
     if not filtered:
-        logger.warning("No valid columns to write for table '%s'.", table)
+        logger.warning("No valid columns to write for table '%s'. Attempted: %s", table, list(record.keys()))
         return
 
     client.table(table).upsert(filtered, on_conflict=conflict).execute()

@@ -136,11 +136,18 @@ def run_review() -> None:
         live_total = payload.get("live_total")
 
         # Map existing pick strings to the standard field names
-        recommended_side = "away" if "受让" in spread_pick else "home"
-        if total_pick == "大分":
-            recommended_total = "over"
-        elif total_pick == "小分":
-            recommended_total = "under"
+        if live_spread is not None and spread_pick:
+            recommended_side = "away" if "受让" in spread_pick else "home"
+        else:
+            recommended_side = ""
+
+        if live_total is not None and total_pick:
+            if total_pick == "大分":
+                recommended_total = "over"
+            elif total_pick == "小分":
+                recommended_total = "under"
+            else:
+                recommended_total = ""
         else:
             recommended_total = ""
 

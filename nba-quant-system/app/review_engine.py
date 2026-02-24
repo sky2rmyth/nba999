@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
     """Keep only the latest prediction per game_id based on created_at."""
-    latest: dict[object, dict] = {}
+    latest: dict = {}
     for row in predictions:
         gid = row.get("game_id")
         if gid not in latest:

@@ -259,6 +259,70 @@ class TestReviewSafety:
             sent_text = mock_send.call_args[0][0]
             assert "当前没有可复盘比赛" in sent_text
 
+    def test_review_deduplicates_predictions_by_game_id(self):
+        """Review uses only the latest prediction per game_id."""
+        with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
+            mock_client = MockClient.return_value
+            mock_client.get_game.return_value = {
+                "id": 1, "status": "Final",
+                "home_team_score": 110, "visitor_team_score": 105,
+            }
+            with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
+                mock_fetch.return_value = [
+                    {"game_id": 1, "created_at": "2025-01-15T01:00:00",
+                     "payload": {"spread_pick": "home", "total_pick": "大分"}},
+                    {"game_id": 1, "created_at": "2025-01-15T02:00:00",
+                     "payload": {"spread_pick": "away", "total_pick": "小分"}},
+                ]
+                with mock.patch("app.review_engine.send_message") as mock_send:
+                    with mock.patch("app.supabase_client.save_review_result") as mock_save:
+                        with mock.patch("app.review_engine.ensure_models"):
+                            from app.review_engine import run_review
+                            run_review()
+
+                # Only one review result saved (deduped)
+                assert mock_save.call_count == 1
+                saved = mock_save.call_args[0][0]
+                # The latest prediction (away/小分) should be used
+                assert saved["spread_pick"] == "away"
+                assert saved["total_pick"] == "小分"
+
+
+# ---------- Deduplication helper ----------
+
+class TestDeduplicatePredictions:
+    def test_keeps_latest_per_game_id(self):
+        from app.review_engine import _deduplicate_predictions
+        preds = [
+            {"game_id": 1, "created_at": "2025-01-15T01:00:00", "payload": "old"},
+            {"game_id": 1, "created_at": "2025-01-15T02:00:00", "payload": "new"},
+            {"game_id": 2, "created_at": "2025-01-15T01:00:00", "payload": "only"},
+        ]
+        result = _deduplicate_predictions(preds)
+        assert len(result) == 2
+        by_gid = {r["game_id"]: r for r in result}
+        assert by_gid[1]["payload"] == "new"
+        assert by_gid[2]["payload"] == "only"
+
+    def test_single_prediction_unchanged(self):
+        from app.review_engine import _deduplicate_predictions
+        preds = [{"game_id": 1, "created_at": "2025-01-15T01:00:00"}]
+        assert _deduplicate_predictions(preds) == preds
+
+    def test_empty_list(self):
+        from app.review_engine import _deduplicate_predictions
+        assert _deduplicate_predictions([]) == []
+
+    def test_missing_created_at_treated_as_empty_string(self):
+        from app.review_engine import _deduplicate_predictions
+        preds = [
+            {"game_id": 1, "payload": "no_ts"},
+            {"game_id": 1, "created_at": "2025-01-15T01:00:00", "payload": "with_ts"},
+        ]
+        result = _deduplicate_predictions(preds)
+        assert len(result) == 1
+        assert result[0]["payload"] == "with_ts"
+
 
 # ---------- Supabase fetch predictions (Requirement 10/13) ----------
 

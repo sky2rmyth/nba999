@@ -212,4 +212,5 @@ def backfill_review_games() -> list[dict]:
 
 
 if __name__ == "__main__":
+    print("Starting review process...")
     run_review()

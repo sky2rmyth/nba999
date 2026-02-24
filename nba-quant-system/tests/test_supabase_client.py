@@ -210,10 +210,10 @@ def test_save_review_result_does_not_raise_on_failure():
     """save_review_result swallows exceptions so the workflow never crashes."""
     fake_client = mock.MagicMock()
     fake_client.table.return_value.upsert.return_value.execute.side_effect = RuntimeError("fail")
-    # Column discovery returns no data (empty table)
-    fake_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock.MagicMock(data=[])
     supabase_client._client = fake_client
     supabase_client._available = True
+    # Pre-populate cache so RPC is not called
+    supabase_client._table_columns_cache["review_results"] = {"game_id", "reviewed_at"}
     supabase_client.save_review_result({"game_id": 1})  # should not raise
 
 
@@ -287,13 +287,13 @@ def test_save_review_result_filters_unknown_columns():
     assert "unknown_field" not in upserted
 
 
-def test_save_review_result_passes_all_when_columns_unknown():
-    """When column discovery fails, all fields are passed through."""
+def test_save_review_result_skips_when_columns_unknown():
+    """When column discovery fails, no fields pass filtering and upsert is skipped."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
 
-    # Column cache set to None (simulating empty table or failed discovery)
+    # Column cache set to None (simulating failed discovery)
     supabase_client._table_columns_cache["review_results"] = None
 
     supabase_client.save_review_result({
@@ -302,11 +302,7 @@ def test_save_review_result_passes_all_when_columns_unknown():
         "extra_field": "kept",
     })
 
-    upserted = fake_client.table.return_value.upsert.call_args[0][0]
-    assert upserted["game_id"] == 42
-    assert upserted["home_team"] == "Lakers"
-    assert upserted["extra_field"] == "kept"
-    assert "reviewed_at" in upserted
+    fake_client.table.return_value.upsert.assert_not_called()
 
 
 # --- upload_models_to_storage ---
@@ -406,6 +402,24 @@ def test_get_table_columns_returns_empty_set_when_not_configured():
     assert supabase_client.get_table_columns("any_table") == set()
 
 
+def test_get_table_columns_uses_information_schema():
+    """_get_table_columns queries information_schema.columns via RPC."""
+    fake_client = mock.MagicMock()
+    fake_client.rpc.return_value.execute.return_value = mock.MagicMock(
+        data=[{"column_name": "game_id"}, {"column_name": "score"}]
+    )
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    cols = supabase_client.get_table_columns("review_results")
+    assert cols == {"game_id", "score"}
+    fake_client.rpc.assert_called_once()
+    call_args = fake_client.rpc.call_args[0]
+    assert call_args[0] == "sql"
+    assert "information_schema.columns" in call_args[1]["query"]
+    assert "review_results" in call_args[1]["query"]
+
+
 # --- adaptive_upsert ---
 
 def test_adaptive_upsert_filters_columns():
@@ -422,8 +436,8 @@ def test_adaptive_upsert_filters_columns():
     assert "extra" not in upserted
 
 
-def test_adaptive_upsert_passes_all_when_columns_unknown():
-    """adaptive_upsert passes all fields when column discovery returns None."""
+def test_adaptive_upsert_skips_when_columns_unknown():
+    """adaptive_upsert skips upsert when column discovery returns None."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
@@ -431,9 +445,7 @@ def test_adaptive_upsert_passes_all_when_columns_unknown():
 
     supabase_client.adaptive_upsert("test_table", {"game_id": 1, "extra": "kept"})
 
-    upserted = fake_client.table.return_value.upsert.call_args[0][0]
-    assert upserted["game_id"] == 1
-    assert upserted["extra"] == "kept"
+    fake_client.table.return_value.upsert.assert_not_called()
 
 
 def test_adaptive_upsert_skips_when_not_configured():

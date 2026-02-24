@@ -262,16 +262,18 @@ class TestReviewSafety:
         predictions = [
             {
                 "game_id": 1,
-                "spread_pick": "home",
-                "total_pick": "over",
-                "predicted_margin": 5.0,
-                "predicted_total": 215.0,
+                "payload": {
+                    "details": {
+                        "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                        "total_rating": {"total_confidence": 60},
+                    }
+                },
             },
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
             with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
                 mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
-                with mock.patch("app.supabase_client.save_review_result") as mock_save:
+                with mock.patch("app.review_engine.save_review_result") as mock_save:
                     with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=[]):
                         from app.review_engine import run_review
                         run_review()
@@ -279,25 +281,38 @@ class TestReviewSafety:
 
     def test_review_computes_rates_from_review_results(self):
         """Hit rates are computed from review_results, not predictions."""
+        predictions = [
+            {
+                "game_id": 1,
+                "payload": {
+                    "details": {
+                        "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                        "total_rating": {"total_confidence": 60},
+                    }
+                },
+            },
+        ]
         review_rows = [
             {"game_id": 1, "spread_hit": True, "ou_hit": False},
             {"game_id": 2, "spread_hit": False, "ou_hit": True},
         ]
-        with mock.patch("app.review_engine.load_latest_predictions", return_value=[]):
-            with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):
-                from app.review_engine import run_review
-                import os, json, tempfile
-                with tempfile.TemporaryDirectory() as td:
-                    old_cwd = os.getcwd()
-                    os.chdir(td)
-                    try:
-                        run_review()
-                        report = json.loads(open("review_latest.json").read())
-                    finally:
-                        os.chdir(old_cwd)
-                assert report["games"] == 2
-                assert report["spread_hit_rate"] == 0.5
-                assert report["total_hit_rate"] == 0.5
+        with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
+            with mock.patch("app.review_engine.fetch_game_result", return_value={"home_score": 110, "visitor_score": 105}):
+                with mock.patch("app.review_engine.save_review_result"):
+                    with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):
+                        from app.review_engine import run_review
+                        import os, json, tempfile
+                        with tempfile.TemporaryDirectory() as td:
+                            old_cwd = os.getcwd()
+                            os.chdir(td)
+                            try:
+                                run_review()
+                                report = json.loads(open("review_latest.json").read())
+                            finally:
+                                os.chdir(old_cwd)
+                        assert report["games"] == 2
+                        assert report["spread_hit_rate"] == 0.5
+                        assert report["total_hit_rate"] == 0.5
 
 
 # ---------- Deduplication helper ----------

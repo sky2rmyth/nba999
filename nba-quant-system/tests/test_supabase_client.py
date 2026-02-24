@@ -476,3 +476,73 @@ def test_adaptive_upsert_custom_conflict():
     supabase_client.adaptive_upsert("test_table", {"id": 1, "value": "x"}, conflict="id")
 
     assert fake_client.table.return_value.upsert.call_args[1]["on_conflict"] == "id"
+
+
+# --- ensure_review_schema ---
+
+def test_ensure_review_schema_skips_when_not_configured():
+    """ensure_review_schema is a no-op without credentials."""
+    supabase_client._available = False
+    supabase_client.ensure_review_schema()  # should not raise
+
+
+def test_ensure_review_schema_skips_when_table_inaccessible():
+    """ensure_review_schema handles inaccessible table gracefully."""
+    fake_client = mock.MagicMock()
+    fake_client.table.return_value.select.return_value.limit.return_value.execute.side_effect = RuntimeError("missing")
+    supabase_client._client = fake_client
+    supabase_client._available = True
+    supabase_client.ensure_review_schema()  # should not raise
+
+
+def test_ensure_review_schema_adds_missing_columns():
+    """ensure_review_schema calls RPC for columns not in the existing schema."""
+    fake_client = mock.MagicMock()
+    # Simulate table with only game_id column
+    fake_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock.MagicMock(
+        data=[{"game_id": "1"}]
+    )
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    supabase_client.ensure_review_schema()
+
+    # Should have called rpc for each missing required column
+    rpc_calls = fake_client.rpc.call_args_list
+    assert len(rpc_calls) > 0
+    # Verify the SQL contains ALTER TABLE
+    for call in rpc_calls:
+        sql = call[0][1]["sql"]
+        assert "ALTER TABLE review_results" in sql
+        assert "ADD COLUMN IF NOT EXISTS" in sql
+
+
+def test_ensure_review_schema_no_rpc_when_all_present():
+    """ensure_review_schema does not call RPC when all columns are present."""
+    fake_client = mock.MagicMock()
+    fake_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock.MagicMock(
+        data=[{
+            "game_id": "1", "spread_pick": "home", "total_pick": "over",
+            "spread_hit": True, "ou_hit": False, "final_home_score": 100,
+            "final_visitor_score": 95, "reviewed_at": "2025-01-01T00:00:00Z",
+        }]
+    )
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    supabase_client.ensure_review_schema()
+
+    fake_client.rpc.assert_not_called()
+
+
+def test_ensure_review_schema_handles_rpc_failure():
+    """ensure_review_schema does not crash when RPC call fails."""
+    fake_client = mock.MagicMock()
+    fake_client.table.return_value.select.return_value.limit.return_value.execute.return_value = mock.MagicMock(
+        data=[{"game_id": "1"}]
+    )
+    fake_client.rpc.return_value.execute.side_effect = RuntimeError("rpc failed")
+    supabase_client._client = fake_client
+    supabase_client._available = True
+
+    supabase_client.ensure_review_schema()  # should not raise

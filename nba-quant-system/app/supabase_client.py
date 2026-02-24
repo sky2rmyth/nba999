@@ -70,15 +70,17 @@ def adaptive_upsert(
 
     try:
         client.table(table).upsert(record, on_conflict=conflict).execute()
-        logger.info("Saved review: %s", record.get("game_id"))
+        logger.info("Upserted record to '%s': %s", table, record.get("game_id"))
     except Exception as exc:
-        logger.warning("UPSERT FAILED: %s", exc)
-        # Retry once
+        logger.warning("UPSERT FAILED for '%s': %s", table, exc)
+        # Retry once after a short delay
+        import time
+        time.sleep(0.5)
         try:
             client.table(table).upsert(record, on_conflict=conflict).execute()
-            logger.info("Saved after retry: %s", record.get("game_id"))
+            logger.info("Upserted after retry to '%s': %s", table, record.get("game_id"))
         except Exception as exc2:
-            logger.error("FINAL SAVE FAILED: %s", exc2)
+            logger.error("FINAL UPSERT FAILED for '%s': %s", table, exc2)
 
 
 def save_prediction(row: dict[str, Any]) -> None:

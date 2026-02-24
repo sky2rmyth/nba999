@@ -56,10 +56,11 @@ def _ensure_tables() -> None:
 
 
 def _get_table_columns(table: str) -> set[str] | None:
-    """Discover column names for *table* by selecting a single row.
+    """Discover column names for *table* from ``information_schema.columns``.
 
-    Returns a set of column names if at least one row exists, otherwise None.
-    The result is cached so the query runs at most once per process.
+    Uses a Supabase RPC call to query the real PostgreSQL schema so that
+    columns are returned even when the table is empty.  The result is
+    cached so the query runs at most once per process.
     """
     if table in _table_columns_cache:
         return _table_columns_cache[table]
@@ -69,9 +70,14 @@ def _get_table_columns(table: str) -> set[str] | None:
         return None
 
     try:
-        resp = client.table(table).select("*").limit(1).execute()
+        safe_table = "".join(c for c in table if c.isalnum() or c == "_")
+        sql = (
+            "SELECT column_name FROM information_schema.columns"
+            f" WHERE table_name = '{safe_table}'"
+        )
+        resp = client.rpc("sql", {"query": sql}).execute()
         if resp.data:
-            columns = set(resp.data[0].keys())
+            columns = {row["column_name"] for row in resp.data}
             _table_columns_cache[table] = columns
             logger.debug("Discovered columns for '%s': %s", table, columns)
             return columns
@@ -98,20 +104,16 @@ def adaptive_upsert(
 ) -> None:
     """Upsert *record* into *table*, automatically filtering unknown columns.
 
-    If the table schema can be discovered, only fields whose names match
-    existing columns are written.  When column discovery fails (e.g. the
-    table is empty), the full record is passed through so new tables can
-    be populated.
+    Only fields whose names match existing columns (discovered from
+    ``information_schema``) are written.  When column discovery fails,
+    no data is written to prevent crashes from unknown column names.
     """
     client = _get_client()
     if client is None:
         return
 
-    cols = _get_table_columns(table)
-    if cols is not None:
-        filtered = {k: v for k, v in record.items() if k in cols}
-    else:
-        filtered = record
+    cols = get_table_columns(table)
+    filtered = {k: v for k, v in record.items() if k in cols}
 
     if not filtered:
         logger.warning("No valid columns to write for table '%s'. Attempted: %s", table, list(record.keys()))

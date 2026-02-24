@@ -11,6 +11,19 @@ from .telegram_bot import send_message
 logger = logging.getLogger(__name__)
 
 
+def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
+    """Keep only the latest prediction per game_id based on created_at."""
+    latest: dict = {}
+    for row in predictions:
+        gid = row.get("game_id")
+        if gid not in latest:
+            latest[gid] = row
+        else:
+            if row.get("created_at", "") > latest[gid].get("created_at", ""):
+                latest[gid] = row
+    return list(latest.values())
+
+
 def _rolling_performance(days: int = 30) -> dict:
     """Compute rolling N-day performance metrics from Supabase review_results."""
     from .supabase_client import fetch_recent_review_results
@@ -35,7 +48,7 @@ def _rolling_performance(days: int = 30) -> dict:
 def run_review() -> None:
     from .supabase_client import fetch_all_predictions, save_review_result
 
-    predictions = fetch_all_predictions()
+    predictions = _deduplicate_predictions(fetch_all_predictions())
 
     if not predictions:
         send_message(cn("review_no_games"))
@@ -146,7 +159,7 @@ def backfill_review_games() -> list[dict]:
 
     logger = logging.getLogger(__name__)
     client = BallDontLieClient()
-    predictions = fetch_all_predictions()
+    predictions = _deduplicate_predictions(fetch_all_predictions())
 
     if not predictions:
         logger.info("backfill: no predictions found")

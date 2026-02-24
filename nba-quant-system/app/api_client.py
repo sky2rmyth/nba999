@@ -69,6 +69,14 @@ class BallDontLieClient:
                 break
         return out
 
+    def get_game(self, game_id: int) -> dict[str, Any]:
+        """Fetch a single game by its ID via ``/games/{game_id}``."""
+        url = f"{self.base_url}/games/{game_id}"
+        headers = {"Authorization": self.api_key}
+        resp = requests.get(url, headers=headers, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.json().get("data", resp.json())
+
     def games(self, **params: Any) -> list[dict[str, Any]]:
         return self.fetch_all_pages("games", params)
 
@@ -139,3 +147,8 @@ def get_injuries() -> list[dict[str, Any]]:
 
 def get_betting_odds(game_id: int) -> list[dict[str, Any]]:
     return _default_client().betting_odds(game_ids=game_id, per_page=100)
+
+
+def get_game(game_id: int) -> dict[str, Any]:
+    """Fetch a single game by ID."""
+    return _default_client().get_game(game_id)

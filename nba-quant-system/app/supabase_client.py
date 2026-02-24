@@ -182,6 +182,34 @@ def fetch_predictions_for_date(game_date: str) -> list[dict[str, Any]]:
     return []
 
 
+def fetch_all_predictions() -> list[dict[str, Any]]:
+    """Fetch all prediction records from Supabase.
+
+    Returns a list of raw rows (each containing ``id``, ``game_id``,
+    ``payload``, and optionally ``game_date``).
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = client.table("predictions").select("*").execute()
+        return resp.data or []
+    except Exception:
+        logger.debug("Supabase: could not fetch all predictions")
+    return []
+
+
+def update_prediction_game_date(record_id: int, game_date: str) -> None:
+    """Set the ``game_date`` column for a prediction row identified by *record_id*."""
+    client = _get_client()
+    if client is None:
+        return
+    client.table("predictions").update(
+        {"game_date": game_date}
+    ).eq("id", record_id).execute()
+    logger.info("Supabase: updated game_date=%s for prediction id=%s", game_date, record_id)
+
+
 # ---------------------------------------------------------------------------
 # Supabase Storage helpers for persistent model files
 # ---------------------------------------------------------------------------

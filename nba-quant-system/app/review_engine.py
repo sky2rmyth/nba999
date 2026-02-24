@@ -140,5 +140,69 @@ def run_review(target_date: str | None = None) -> None:
     ensure_models(force=len(rows) >= 1)
 
 
+def backfill_review_games() -> list[dict]:
+    """Backfill game_date for existing predictions using the BallDontLie API.
+
+    For each prediction stored in Supabase:
+    1. Fetch the game via ``/games/{game_id}``.
+    2. If the prediction has no ``game_date``, update it with the API value.
+    3. Only "Final" games are included in the returned list so they can be
+       reviewed without re-predicting.
+
+    Returns a list of API game dicts that have status "Final".
+    """
+    import logging
+
+    from .supabase_client import (
+        fetch_all_predictions,
+        update_prediction_game_date,
+    )
+
+    logger = logging.getLogger(__name__)
+    client = BallDontLieClient()
+    predictions = fetch_all_predictions()
+
+    if not predictions:
+        logger.info("backfill: no predictions found")
+        return []
+
+    final_games: list[dict] = []
+
+    for row in predictions:
+        game_id = row.get("game_id")
+        if not game_id:
+            continue
+
+        try:
+            game = client.get_game(int(game_id))
+        except Exception:
+            logger.warning("backfill: could not fetch game %s", game_id)
+            continue
+
+        game_date = game.get("date", "")
+        if isinstance(game_date, str) and "T" in game_date:
+            game_date = game_date.split("T")[0]
+
+        # Update game_date when missing
+        if not row.get("game_date") and game_date:
+            record_id = row.get("id")
+            if record_id is not None:
+                try:
+                    update_prediction_game_date(int(record_id), game_date)
+                except Exception:
+                    logger.warning("backfill: could not update game_date for id=%s", record_id)
+
+        # Collect Final games for review
+        status = str(game.get("status", ""))
+        if status.startswith("Final"):
+            game["game_date"] = game_date
+            game["home_score"] = game.get("home_team_score", 0)
+            game["away_score"] = game.get("visitor_team_score", 0)
+            final_games.append(game)
+
+    logger.info("backfill: processed %d predictions, %d final games", len(predictions), len(final_games))
+    return final_games
+
+
 if __name__ == "__main__":
     run_review()

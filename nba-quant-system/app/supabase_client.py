@@ -71,6 +71,7 @@ def save_prediction(row: dict[str, Any]) -> None:
     try:
         client.table("predictions").insert({
             "game_id": record["game_id"],
+            "game_date": record.get("game_date"),
             "payload": record,
         }).execute()
         logger.info("Supabase: prediction saved for game %s", row.get("game_id"))
@@ -170,11 +171,13 @@ def fetch_predictions_for_date(game_date: str) -> list[dict[str, Any]]:
     if client is None:
         return []
     try:
-        resp = client.table("predictions").select("payload").execute()
+        resp = client.table("predictions").select("payload").eq(
+            "game_date", game_date
+        ).execute()
         results = []
         for row in resp.data or []:
             payload = row.get("payload") or {}
-            if payload.get("game_date") == game_date and payload.get("is_final_prediction"):
+            if payload.get("is_final_prediction"):
                 results.append(payload)
         return results
     except Exception:

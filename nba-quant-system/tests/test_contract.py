@@ -260,9 +260,8 @@ class TestReviewSafety:
 class TestSupabaseFetchPredictions:
     def test_fetch_predictions_for_date_returns_matching(self):
         fake_client = mock.MagicMock()
-        fake_client.table.return_value.select.return_value.execute.return_value.data = [
+        fake_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
             {"payload": {"game_date": "2025-01-15", "game_id": 42, "is_final_prediction": True}},
-            {"payload": {"game_date": "2025-01-14", "game_id": 41, "is_final_prediction": True}},
         ]
         supabase_client._client = fake_client
         supabase_client._available = True
@@ -270,6 +269,7 @@ class TestSupabaseFetchPredictions:
         results = supabase_client.fetch_predictions_for_date("2025-01-15")
         assert len(results) == 1
         assert results[0]["game_id"] == 42
+        fake_client.table.return_value.select.return_value.eq.assert_called_with("game_date", "2025-01-15")
 
     def test_fetch_predictions_for_date_empty_when_not_configured(self):
         supabase_client._available = False

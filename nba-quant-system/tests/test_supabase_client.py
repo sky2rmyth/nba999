@@ -99,8 +99,9 @@ def test_save_prediction_uses_payload_jsonb():
 
     inserted = fake_client.table.return_value.insert.call_args[0][0]
     assert inserted["game_id"] == 42
+    assert inserted["game_date"] == "2025-01-15"
     assert "payload" in inserted
-    assert len(inserted) == 2  # only 'game_id' and 'payload' at top level
+    assert len(inserted) == 3  # 'game_id', 'game_date', and 'payload' at top level
     payload = inserted["payload"]
     assert payload["game_id"] == 42
     assert payload["game_date"] == "2025-01-15"

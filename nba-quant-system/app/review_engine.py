@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 
 from .api_client import BallDontLieClient
-from .database import get_conn, save_result
+from .database import get_conn
 from .i18n_cn import cn
 from .rating_engine import is_spread_correct, is_total_correct
 from .retrain_engine import ensure_models
 from .telegram_bot import send_message
+
+logger = logging.getLogger(__name__)
 
 
 def _rolling_performance(days: int = 30) -> dict:
@@ -50,72 +53,77 @@ def _rolling_performance(days: int = 30) -> dict:
     return {"spread_rate": spread_rate, "total_rate": total_rate, "roi": roi, "count": count}
 
 
-def run_review(target_date: str | None = None) -> None:
-    target_date = target_date or datetime.utcnow().strftime("%Y-%m-%d")
+def run_review() -> None:
+    from .supabase_client import fetch_all_predictions, save_review_result
+
+    predictions = fetch_all_predictions()
+
+    if not predictions:
+        send_message(cn("review_no_games"))
+        return
+
     client = BallDontLieClient()
 
-    try:
-        games = client.games(**{"dates[]": [target_date], "per_page": 100})
-    except Exception:
-        games = []
+    # Extract unique game_ids
+    game_ids = {row["game_id"] for row in predictions if row.get("game_id")}
 
-    # --- Safety: only process finished games ---
-    finished_games = [g for g in games if str(g.get("status", "")).startswith("Final")]
+    # Fetch game status for each game_id
+    final_games: dict[int, dict] = {}
+    for game_id in game_ids:
+        try:
+            game = client.get_game(int(game_id))
+        except Exception:
+            logger.warning("review: could not fetch game %s", game_id)
+            continue
+        if str(game.get("status", "")) == "Final":
+            final_games[game_id] = game
 
-    if not finished_games:
+    if not final_games:
         send_message(cn("review_no_games"))
         return
 
-    for g in finished_games:
-        save_result(g["id"], int(g.get("home_team_score", 0)), int(g.get("visitor_team_score", 0)), g)
-
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT p.*, r.final_home_score, r.final_visitor_score
-            FROM predictions_snapshot p
-            JOIN results r ON p.game_id=r.game_id
-            WHERE p.snapshot_date=? AND p.is_final_prediction = 1
-            """,
-            (target_date,),
-        ).fetchall()
-
-    if not rows:
-        send_message(cn("review_no_games"))
-        return
-
+    reviewed = 0
     spread_hits = 0
     total_hits = 0
-    clv_open = 0.0
-    clv_live = 0.0
-    stake = max(len(rows), 1)
 
-    from .supabase_client import save_review_result
+    for pred in predictions:
+        gid = pred.get("game_id")
+        if gid not in final_games:
+            continue
 
-    for r in rows:
-        margin = r["final_home_score"] - r["final_visitor_score"]
-        total = r["final_home_score"] + r["final_visitor_score"]
-        spread_correct = is_spread_correct(r["spread_pick"], margin, r["live_spread"] or 0)
-        total_correct = is_total_correct(r["total_pick"], total, r["live_total"])
+        game = final_games[gid]
+        payload = pred.get("payload") or {}
+
+        home_score = int(game.get("home_team_score", 0))
+        visitor_score = int(game.get("visitor_team_score", 0))
+        margin = home_score - visitor_score
+        total_pts = home_score + visitor_score
+
+        spread_pick = payload.get("spread_pick", "")
+        total_pick = payload.get("total_pick", "")
+        live_spread = payload.get("live_spread")
+        live_total = payload.get("live_total")
+
+        spread_correct = is_spread_correct(spread_pick, margin, live_spread)
+        total_correct = is_total_correct(total_pick, total_pts, live_total)
+
         spread_hits += int(spread_correct)
         total_hits += int(total_correct)
-        clv_open += abs((r["opening_spread"] or 0) - (r["live_spread"] or 0))
-        clv_live += abs((r["live_spread"] or 0) - margin)
+        reviewed += 1
 
-        # --- Save review result to Supabase ---
         save_review_result({
-            "game_id": r["game_id"],
-            "game_date": target_date,
-            "home_team": r["home_team"],
-            "away_team": r["away_team"],
-            "spread_pick": r["spread_pick"],
-            "total_pick": r["total_pick"],
+            "game_id": gid,
+            "home_team": payload.get("home_team"),
+            "away_team": payload.get("away_team"),
+            "spread_pick": spread_pick,
+            "total_pick": total_pick,
             "spread_correct": bool(spread_correct),
             "total_correct": bool(total_correct),
-            "final_home_score": r["final_home_score"],
-            "final_visitor_score": r["final_visitor_score"],
+            "final_home_score": home_score,
+            "final_visitor_score": visitor_score,
         })
 
+    stake = max(reviewed, 1)
     spread_rate = spread_hits / stake
     total_rate = total_hits / stake
     win_rate = (spread_hits + total_hits) / (2 * stake)
@@ -124,12 +132,11 @@ def run_review(target_date: str | None = None) -> None:
     rolling = _rolling_performance(30)
 
     msg = (
-        f"📊 昨日战绩｜{target_date}\n\n"
+        f"📊 复盘报告\n\n"
         f"让分命中率：{spread_rate:.1%}\n"
         f"大小命中率：{total_rate:.1%}\n"
         f"综合胜率：{win_rate:.1%}\n"
-        f"CLV(初盘)：{clv_open/stake:.2f}\n"
-        f"CLV(即时)：{clv_live/stake:.2f}\n"
+        f"复盘场次：{reviewed}\n"
         f"\n━━━━━━━━━━━━━━━━\n"
         f"📈 近30天滚动表现\n"
         f"让分命中率：{rolling['spread_rate']:.1%}\n"
@@ -137,7 +144,7 @@ def run_review(target_date: str | None = None) -> None:
         f"样本数：{rolling['count']}"
     )
     send_message(msg)
-    ensure_models(force=len(rows) >= 1)
+    ensure_models(force=reviewed >= 1)
 
 
 def backfill_review_games() -> list[dict]:

@@ -8,6 +8,7 @@ from datetime import datetime
 import requests
 
 from .api_client import BallDontLieClient
+from .telegram_bot import send_message
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +228,7 @@ def run_review() -> None:
         else:
             o_hit = False
 
-        save_review_result({
+        record = {
             "game_id": game_id,
             "spread_pick": spread_pick,
             "total_pick": total_pick,
@@ -236,7 +237,22 @@ def run_review() -> None:
             "final_home_score": home,
             "final_visitor_score": away,
             "reviewed_at": datetime.utcnow().isoformat(),
-        })
+        }
+        save_review_result(record)
+
+        msg = (
+            "📊 NBA复盘完成\n"
+            f"比赛ID: {record['game_id']}\n"
+            f"让分命中: {record['spread_hit']}\n"
+            f"大小分命中: {record['ou_hit']}\n"
+            f"最终比分: "
+            f"{record['final_home_score']}-"
+            f"{record['final_visitor_score']}"
+        )
+        try:
+            send_message(msg)
+        except Exception:
+            logger.debug("Telegram send failed for game %s", game_id)
 
     review_rows = fetch_recent_review_results()
     n = len(review_rows)

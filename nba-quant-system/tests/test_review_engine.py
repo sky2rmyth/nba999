@@ -8,6 +8,7 @@ from app.review_engine import (
     extract_prediction_fields,
     fetch_game_result,
     parse_prediction,
+    run_review,
     spread_hit,
     total_hit,
 )
@@ -433,3 +434,39 @@ class TestFetchGameResult:
         mock_get.side_effect = Exception("timeout")
         result = fetch_game_result(12345)
         assert result is None
+
+
+# --- run_review Telegram notification ---
+
+class TestRunReviewTelegram:
+    @patch("app.review_engine.send_message")
+    @patch("app.review_engine.fetch_game_result")
+    @patch("app.review_engine.load_latest_predictions")
+    @patch("app.review_engine.extract_prediction_fields")
+    def test_send_message_called_after_review(
+        self, mock_extract, mock_load, mock_fetch, mock_send
+    ):
+        """run_review sends a Telegram message for each reviewed game."""
+        mock_load.return_value = [
+            {
+                "game_id": 42,
+                "payload": {"details": {"simulation": {"predicted_margin": 5.0, "predicted_total": 215.0}}},
+            }
+        ]
+        mock_extract.return_value = ("home", "over")
+        mock_fetch.return_value = {
+            "home_score": 110,
+            "visitor_score": 100,
+            "spread": 0,
+            "total": 0,
+        }
+
+        with patch("app.supabase_client.save_review_result"), \
+             patch("app.supabase_client.fetch_recent_review_results", return_value=[]):
+            run_review()
+
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        assert "42" in msg
+        assert "110" in msg
+        assert "100" in msg

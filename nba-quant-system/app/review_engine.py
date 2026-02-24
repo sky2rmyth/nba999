@@ -11,7 +11,8 @@ from .api_client import BallDontLieClient
 
 logger = logging.getLogger(__name__)
 
-BALLDONTLIE_API_KEY = os.getenv("BALLDONTLIE_API_KEY", "")
+BALLDONTLIE = "https://api.balldontlie.io/v1"
+API_KEY = os.getenv("BALLDONTLIE_API_KEY", "")
 
 
 def spread_hit(row: dict) -> bool:
@@ -153,38 +154,34 @@ def load_latest_predictions() -> list[dict]:
 
 
 def fetch_game_result(game_id):
-    """Fetch final scores for a game from the NBA stats API."""
-    url = f"https://stats.nba.com/stats/boxscoresummaryv2?GameID={game_id}"
+    """Fetch final scores for a game from the BallDontLie API."""
+    url = f"{BALLDONTLIE}/games/{game_id}"
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://www.nba.com/",
-        "Accept": "application/json"
+        "Authorization": API_KEY
     }
 
     try:
         r = requests.get(url, headers=headers, timeout=20)
 
         if r.status_code != 200:
-            print("API FAIL:", game_id, r.status_code)
+            print("BALLDONTLIE BAD RESPONSE:", r.text)
             return None
 
-        data = r.json()
+        data = r.json()["data"]
 
-        # LineScore dataset
-        lines = data["resultSets"][5]["rowSet"]
-
-        visitor_score = int(lines[0][22])
-        home_score = int(lines[1][22])
+        if data["status"] != "Final":
+            print("GAME NOT FINISHED:", game_id)
+            return None
 
         return {
-            "home_score": home_score,
-            "visitor_score": visitor_score,
+            "home_score": data["home_team_score"],
+            "visitor_score": data["visitor_team_score"],
             "spread": 0,
-            "total": home_score + visitor_score
+            "total": 0
         }
 
     except Exception as e:
-        print("RESULT PARSE ERROR:", e)
+        print("BALLDONTLIE ERROR:", e)
         return None
 
 

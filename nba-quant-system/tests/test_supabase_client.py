@@ -291,7 +291,7 @@ def test_save_review_result_passes_all_when_columns_unknown():
     supabase_client._client = fake_client
     supabase_client._available = True
 
-    # Column cache explicitly set to None (empty table / discovery failed)
+    # Column cache set to None (simulating empty table or failed discovery)
     supabase_client._table_columns_cache["review_results"] = None
 
     supabase_client.save_review_result({

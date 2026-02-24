@@ -76,7 +76,7 @@ def _get_table_columns(table: str) -> set[str] | None:
             logger.debug("Discovered columns for '%s': %s", table, columns)
             return columns
     except Exception:
-        logger.debug("Could not discover columns for table '%s'", table)
+        logger.debug("Could not discover columns for table '%s'", table, exc_info=True)
 
     _table_columns_cache[table] = None
     return None
@@ -169,7 +169,7 @@ def save_review_result(row: dict[str, Any]) -> None:
         client.table("review_results").insert(record).execute()
         logger.info("Supabase: review result saved for game %s", row.get("game_id"))
     except Exception:
-        logger.exception("Supabase: failed to save review result — continuing")
+        logger.exception("Supabase: failed to save review result for game %s — continuing", row.get("game_id"))
 
 
 def fetch_latest_training_metrics() -> dict[str, Any] | None:

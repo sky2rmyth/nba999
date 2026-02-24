@@ -70,9 +70,10 @@ def _get_table_columns(table: str) -> set[str] | None:
         return None
 
     try:
+        safe_table = "".join(c for c in table if c.isalnum() or c == "_")
         sql = (
             "SELECT column_name FROM information_schema.columns"
-            f" WHERE table_name = '{table}'"
+            f" WHERE table_name = '{safe_table}'"
         )
         resp = client.rpc("sql", {"query": sql}).execute()
         if resp.data:

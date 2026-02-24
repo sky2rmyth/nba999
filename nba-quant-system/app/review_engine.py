@@ -88,6 +88,13 @@ def load_latest_predictions() -> list[dict]:
         .order("created_at", desc=True) \
         .execute()
 
+    if not res.data:
+        raise Exception("No predictions found")
+
+    print("==== SAMPLE PREDICTION ROW ====")
+    print(res.data[0])
+    print("================================")
+
     rows = res.data
 
     latest: dict = {}

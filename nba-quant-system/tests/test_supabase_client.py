@@ -384,3 +384,83 @@ def test_download_models_returns_false_when_required_missing(tmp_path):
 
     result = supabase_client.download_models_from_storage(tmp_path)
     assert result is False
+
+
+# --- get_table_columns ---
+
+def test_get_table_columns_returns_set():
+    """get_table_columns returns a set of column names."""
+    supabase_client._table_columns_cache["my_table"] = {"id", "name"}
+    assert supabase_client.get_table_columns("my_table") == {"id", "name"}
+
+
+def test_get_table_columns_returns_empty_set_when_unknown():
+    """get_table_columns returns empty set when columns are unknown."""
+    supabase_client._table_columns_cache["my_table"] = None
+    assert supabase_client.get_table_columns("my_table") == set()
+
+
+def test_get_table_columns_returns_empty_set_when_not_configured():
+    """get_table_columns returns empty set without credentials."""
+    supabase_client._available = False
+    assert supabase_client.get_table_columns("any_table") == set()
+
+
+# --- adaptive_upsert ---
+
+def test_adaptive_upsert_filters_columns():
+    """adaptive_upsert drops fields not present in the table."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+    supabase_client._table_columns_cache["test_table"] = {"game_id", "score"}
+
+    supabase_client.adaptive_upsert("test_table", {"game_id": 1, "score": 100, "extra": "ignored"})
+
+    upserted = fake_client.table.return_value.upsert.call_args[0][0]
+    assert upserted == {"game_id": 1, "score": 100}
+    assert "extra" not in upserted
+
+
+def test_adaptive_upsert_passes_all_when_columns_unknown():
+    """adaptive_upsert passes all fields when column discovery returns None."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+    supabase_client._table_columns_cache["test_table"] = None
+
+    supabase_client.adaptive_upsert("test_table", {"game_id": 1, "extra": "kept"})
+
+    upserted = fake_client.table.return_value.upsert.call_args[0][0]
+    assert upserted["game_id"] == 1
+    assert upserted["extra"] == "kept"
+
+
+def test_adaptive_upsert_skips_when_not_configured():
+    """adaptive_upsert is a no-op without credentials."""
+    supabase_client._available = False
+    supabase_client.adaptive_upsert("test_table", {"game_id": 1})  # should not raise
+
+
+def test_adaptive_upsert_skips_when_no_valid_columns():
+    """adaptive_upsert does nothing when all columns are filtered out."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+    supabase_client._table_columns_cache["test_table"] = {"id"}
+
+    supabase_client.adaptive_upsert("test_table", {"extra": "no_match"})
+
+    fake_client.table.return_value.upsert.assert_not_called()
+
+
+def test_adaptive_upsert_custom_conflict():
+    """adaptive_upsert passes through the conflict parameter."""
+    fake_client = mock.MagicMock()
+    supabase_client._client = fake_client
+    supabase_client._available = True
+    supabase_client._table_columns_cache["test_table"] = {"id", "value"}
+
+    supabase_client.adaptive_upsert("test_table", {"id": 1, "value": "x"}, conflict="id")
+
+    assert fake_client.table.return_value.upsert.call_args[1]["on_conflict"] == "id"

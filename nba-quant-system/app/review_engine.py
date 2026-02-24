@@ -4,11 +4,59 @@ import logging
 
 from .api_client import BallDontLieClient
 from .i18n_cn import cn
-from .rating_engine import is_spread_correct, is_total_correct
 from .retrain_engine import ensure_models
 from .telegram_bot import send_message
 
 logger = logging.getLogger(__name__)
+
+
+def spread_hit(row: dict) -> bool:
+    """Determine if a spread pick was correct.
+
+    Uses ``final_home_score``, ``final_visitor_score``, ``spread``, and
+    ``recommended_side`` fields from *row*.
+    """
+    actual_margin = row["final_home_score"] - row["final_visitor_score"]
+    spread = row["spread"]
+    if row["recommended_side"] == "home":
+        return actual_margin > spread
+    if row["recommended_side"] == "away":
+        return actual_margin < spread
+    return False
+
+
+def total_hit(row: dict) -> bool:
+    """Determine if a total (over/under) pick was correct.
+
+    Uses ``final_home_score``, ``final_visitor_score``, ``recommended_total``,
+    and ``total_line`` fields from *row*.
+    """
+    actual_total = row["final_home_score"] + row["final_visitor_score"]
+    if row["recommended_total"] == "over":
+        return actual_total > row["total_line"]
+    if row["recommended_total"] == "under":
+        return actual_total < row["total_line"]
+    return False
+
+
+def calculate_rates(rows: list[dict]) -> tuple[float, float, float]:
+    """Compute spread, total, and overall hit rates from review result rows.
+
+    Returns ``(spread_rate, total_rate, overall_rate)``.  All values are 0
+    when *rows* is empty.
+    """
+    if not rows:
+        return 0, 0, 0
+
+    n = len(rows)
+    spread_hits = sum(int(r["spread_hit"]) for r in rows)
+    total_hits = sum(int(r["ou_hit"]) for r in rows)
+
+    spread_rate = spread_hits / n
+    total_rate = total_hits / n
+    overall_rate = (spread_hits + total_hits) / (n * 2)
+
+    return spread_rate, total_rate, overall_rate
 
 
 def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
@@ -30,17 +78,10 @@ def _rolling_performance(days: int = 30) -> dict:
 
     rows = fetch_recent_review_results(days)
 
-    if not rows:
-        return {"spread_rate": 0.0, "total_rate": 0.0, "roi": 0.0, "count": 0}
-
-    spread_hits = sum(1 for r in rows if r.get("spread_correct"))
-    total_hits = sum(1 for r in rows if r.get("total_correct"))
+    spread_rate, total_rate, overall_rate = calculate_rates(rows)
     count = len(rows)
-    total_bets = count * 2
 
-    spread_rate = spread_hits / max(count, 1)
-    total_rate = total_hits / max(count, 1)
-    roi = ((spread_hits + total_hits) / max(total_bets, 1)) * 2 - 1
+    roi = overall_rate * 2 - 1 if count else 0.0
 
     return {"spread_rate": spread_rate, "total_rate": total_rate, "roi": roi, "count": count}
 
@@ -88,19 +129,35 @@ def run_review() -> None:
 
         home_score = int(game.get("home_team_score", 0))
         visitor_score = int(game.get("visitor_team_score", 0))
-        margin = home_score - visitor_score
-        total_pts = home_score + visitor_score
 
         spread_pick = payload.get("spread_pick", "")
         total_pick = payload.get("total_pick", "")
         live_spread = payload.get("live_spread")
         live_total = payload.get("live_total")
 
-        spread_correct = is_spread_correct(spread_pick, margin, live_spread)
-        total_correct = is_total_correct(total_pick, total_pts, live_total)
+        # Map existing pick strings to the standard field names
+        recommended_side = "away" if "受让" in spread_pick else "home"
+        if total_pick == "大分":
+            recommended_total = "over"
+        elif total_pick == "小分":
+            recommended_total = "under"
+        else:
+            recommended_total = ""
 
-        spread_hits += int(spread_correct)
-        total_hits += int(total_correct)
+        hit_row = {
+            "final_home_score": home_score,
+            "final_visitor_score": visitor_score,
+            "spread": live_spread if live_spread is not None else 0,
+            "recommended_side": recommended_side,
+            "recommended_total": recommended_total,
+            "total_line": live_total if live_total is not None else 0,
+        }
+
+        s_hit = spread_hit(hit_row)
+        t_hit = total_hit(hit_row)
+
+        spread_hits += int(s_hit)
+        total_hits += int(t_hit)
         reviewed += 1
 
         save_review_result({
@@ -109,8 +166,8 @@ def run_review() -> None:
             "away_team": payload.get("away_team"),
             "spread_pick": spread_pick,
             "total_pick": total_pick,
-            "spread_correct": bool(spread_correct),
-            "total_correct": bool(total_correct),
+            "spread_hit": bool(s_hit),
+            "ou_hit": bool(t_hit),
             "final_home_score": home_score,
             "final_visitor_score": visitor_score,
         })

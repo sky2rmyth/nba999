@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime
 
 import requests
 
@@ -95,6 +96,25 @@ def parse_prediction(row: dict) -> dict:
     }
 
 
+def extract_prediction_fields(p: dict) -> tuple[str, str]:
+    """Extract spread and total picks from a raw Supabase prediction row.
+
+    Returns ``(spread_pick, total_pick)`` derived from the nested
+    ``payload.details.simulation`` structure.
+    """
+    payload = p.get("payload", {})
+    details = payload.get("details", {})
+    sim = details.get("simulation", {})
+
+    predicted_margin = sim.get("predicted_margin")
+    predicted_total = sim.get("predicted_total")
+
+    spread_pick = "home" if predicted_margin and predicted_margin > 0 else "away"
+    total_pick = "over" if predicted_total and predicted_total > 0 else "under"
+
+    return spread_pick, total_pick
+
+
 def _deduplicate_predictions(predictions: list[dict]) -> list[dict]:
     """Keep only the latest prediction per game_id based on created_at."""
     latest: dict = {}
@@ -116,27 +136,20 @@ def load_latest_predictions() -> list[dict]:
     if client is None:
         return []
 
-    res = client.table("predictions") \
-        .select("*") \
-        .order("created_at", desc=True) \
+    res = (
+        client.table("predictions")
+        .select("*")
+        .order("created_at", desc=True)
         .execute()
-
-    if not res.data:
-        raise Exception("No predictions found")
-
-    print("==== SAMPLE PREDICTION ROW ====")
-    print(res.data[0])
-    print("================================")
-
-    rows = res.data
+    )
 
     latest: dict = {}
-    for r in rows:
-        gid = r["game_id"]
+    for row in res.data:
+        gid = row["game_id"]
         if gid not in latest:
-            latest[gid] = r
+            latest[gid] = row
 
-    return [parse_prediction(r) for r in latest.values()]
+    return list(latest.values())
 
 
 def fetch_game_result(game_id):
@@ -157,7 +170,10 @@ def run_review() -> None:
     predictions = load_latest_predictions()
 
     for p in predictions:
-        result = fetch_game_result(p["game_id"])
+        game_id = p["game_id"]
+        spread_pick, total_pick = extract_prediction_fields(p)
+
+        result = fetch_game_result(game_id)
 
         home = result["home_score"]
         away = result["visitor_score"]
@@ -167,28 +183,33 @@ def run_review() -> None:
 
         s_hit = (
             actual_margin > 0
-            if p["spread_pick"] == "home"
+            if spread_pick == "home"
             else actual_margin < 0
         )
 
-        predicted_total = p.get("predicted_total")
+        payload = p.get("payload", {})
+        details = payload.get("details", {})
+        sim = details.get("simulation", {})
+        predicted_total = sim.get("predicted_total")
+
         if predicted_total is not None:
             o_hit = (
                 actual_total > predicted_total
-                if p["total_pick"] == "over"
+                if total_pick == "over"
                 else actual_total < predicted_total
             )
         else:
             o_hit = False
 
         save_review_result({
-            "game_id": p["game_id"],
-            "spread_pick": p["spread_pick"],
-            "total_pick": p["total_pick"],
+            "game_id": game_id,
+            "spread_pick": spread_pick,
+            "total_pick": total_pick,
             "spread_hit": s_hit,
             "ou_hit": o_hit,
             "final_home_score": home,
             "final_visitor_score": away,
+            "reviewed_at": datetime.utcnow().isoformat(),
         })
 
     review_rows = fetch_recent_review_results()

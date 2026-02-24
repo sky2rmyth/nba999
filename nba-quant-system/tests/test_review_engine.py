@@ -1,7 +1,13 @@
 """Tests for review_engine hit-checking and rate calculation functions."""
 from __future__ import annotations
 
-from app.review_engine import calculate_rates, parse_prediction, spread_hit, total_hit
+from app.review_engine import (
+    calculate_rates,
+    extract_prediction_fields,
+    parse_prediction,
+    spread_hit,
+    total_hit,
+)
 
 
 # --- parse_prediction ---
@@ -278,3 +284,93 @@ class TestCalculateRates:
         assert s == 1.0
         assert t == 0.0
         assert o == 0.5
+
+
+# --- extract_prediction_fields ---
+
+class TestExtractPredictionFields:
+    def test_home_spread_positive_margin(self):
+        """Positive predicted_margin yields spread_pick 'home'."""
+        row = {
+            "game_id": 1,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                }
+            },
+        }
+        spread_pick, total_pick = extract_prediction_fields(row)
+        assert spread_pick == "home"
+
+    def test_away_spread_negative_margin(self):
+        """Negative predicted_margin yields spread_pick 'away'."""
+        row = {
+            "game_id": 2,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": -3.0, "predicted_total": 210.0},
+                }
+            },
+        }
+        spread_pick, total_pick = extract_prediction_fields(row)
+        assert spread_pick == "away"
+
+    def test_zero_margin_yields_away(self):
+        """Zero predicted_margin yields spread_pick 'away' (falsy)."""
+        row = {
+            "game_id": 3,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 0, "predicted_total": 210.0},
+                }
+            },
+        }
+        spread_pick, _ = extract_prediction_fields(row)
+        assert spread_pick == "away"
+
+    def test_over_total_positive(self):
+        """Positive predicted_total yields total_pick 'over'."""
+        row = {
+            "game_id": 4,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 2.0, "predicted_total": 220.0},
+                }
+            },
+        }
+        _, total_pick = extract_prediction_fields(row)
+        assert total_pick == "over"
+
+    def test_under_total_negative(self):
+        """Negative predicted_total yields total_pick 'under'."""
+        row = {
+            "game_id": 5,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 2.0, "predicted_total": -5.0},
+                }
+            },
+        }
+        _, total_pick = extract_prediction_fields(row)
+        assert total_pick == "under"
+
+    def test_missing_payload_defaults(self):
+        """Missing payload falls back to 'away' and 'under'."""
+        row = {"game_id": 6, "payload": {}}
+        spread_pick, total_pick = extract_prediction_fields(row)
+        assert spread_pick == "away"
+        assert total_pick == "under"
+
+    def test_returns_tuple(self):
+        """Returns a tuple of two strings."""
+        row = {
+            "game_id": 7,
+            "payload": {
+                "details": {
+                    "simulation": {"predicted_margin": 1.0, "predicted_total": 200.0},
+                }
+            },
+        }
+        result = extract_prediction_fields(row)
+        assert isinstance(result, tuple)
+        assert len(result) == 2

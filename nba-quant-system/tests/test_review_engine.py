@@ -13,7 +13,7 @@ class TestSpreadHit:
             "final_home_score": 110,
             "final_visitor_score": 100,
             "spread": 5,
-            "recommended_side": "home",
+            "spread_pick": "home",
         }
         assert spread_hit(row) is True
 
@@ -23,7 +23,7 @@ class TestSpreadHit:
             "final_home_score": 103,
             "final_visitor_score": 100,
             "spread": 5,
-            "recommended_side": "home",
+            "spread_pick": "home",
         }
         assert spread_hit(row) is False
 
@@ -33,7 +33,7 @@ class TestSpreadHit:
             "final_home_score": 100,
             "final_visitor_score": 105,
             "spread": -3,
-            "recommended_side": "away",
+            "spread_pick": "away",
         }
         assert spread_hit(row) is True
 
@@ -43,17 +43,17 @@ class TestSpreadHit:
             "final_home_score": 110,
             "final_visitor_score": 100,
             "spread": -3,
-            "recommended_side": "away",
+            "spread_pick": "away",
         }
         assert spread_hit(row) is False
 
     def test_unknown_side_returns_false(self):
-        """Unknown recommended_side returns False."""
+        """Unknown spread_pick returns False."""
         row = {
             "final_home_score": 110,
             "final_visitor_score": 100,
             "spread": 0,
-            "recommended_side": "unknown",
+            "spread_pick": "unknown",
         }
         assert spread_hit(row) is False
 
@@ -63,7 +63,7 @@ class TestSpreadHit:
             "final_home_score": 105,
             "final_visitor_score": 100,
             "spread": 5,
-            "recommended_side": "home",
+            "spread_pick": "home",
         }
         assert spread_hit(row) is False
 
@@ -76,7 +76,7 @@ class TestTotalHit:
         row = {
             "final_home_score": 115,
             "final_visitor_score": 110,
-            "recommended_total": "over",
+            "total_pick": "over",
             "total_line": 220,
         }
         assert total_hit(row) is True
@@ -86,7 +86,7 @@ class TestTotalHit:
         row = {
             "final_home_score": 100,
             "final_visitor_score": 105,
-            "recommended_total": "over",
+            "total_pick": "over",
             "total_line": 220,
         }
         assert total_hit(row) is False
@@ -96,7 +96,7 @@ class TestTotalHit:
         row = {
             "final_home_score": 100,
             "final_visitor_score": 105,
-            "recommended_total": "under",
+            "total_pick": "under",
             "total_line": 220,
         }
         assert total_hit(row) is True
@@ -106,17 +106,17 @@ class TestTotalHit:
         row = {
             "final_home_score": 115,
             "final_visitor_score": 110,
-            "recommended_total": "under",
+            "total_pick": "under",
             "total_line": 220,
         }
         assert total_hit(row) is False
 
     def test_unknown_total_returns_false(self):
-        """Unknown recommended_total returns False."""
+        """Unknown total_pick returns False."""
         row = {
             "final_home_score": 110,
             "final_visitor_score": 100,
-            "recommended_total": "",
+            "total_pick": "",
             "total_line": 220,
         }
         assert total_hit(row) is False
@@ -126,7 +126,7 @@ class TestTotalHit:
         row = {
             "final_home_score": 110,
             "final_visitor_score": 110,
-            "recommended_total": "over",
+            "total_pick": "over",
             "total_line": 220,
         }
         assert total_hit(row) is False

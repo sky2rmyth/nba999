@@ -17,13 +17,13 @@ def spread_hit(row: dict) -> bool:
     """Determine if a spread pick was correct.
 
     Uses ``final_home_score``, ``final_visitor_score``, ``spread``, and
-    ``recommended_side`` fields from *row*.
+    ``spread_pick`` fields from *row*.
     """
     actual_margin = row["final_home_score"] - row["final_visitor_score"]
     spread = row["spread"]
-    if row["recommended_side"] == "home":
+    if row["spread_pick"] == "home":
         return actual_margin > spread
-    if row["recommended_side"] == "away":
+    if row["spread_pick"] == "away":
         return actual_margin < spread
     return False
 
@@ -31,13 +31,13 @@ def spread_hit(row: dict) -> bool:
 def total_hit(row: dict) -> bool:
     """Determine if a total (over/under) pick was correct.
 
-    Uses ``final_home_score``, ``final_visitor_score``, ``recommended_total``,
+    Uses ``final_home_score``, ``final_visitor_score``, ``total_pick``,
     and ``total_line`` fields from *row*.
     """
     actual_total = row["final_home_score"] + row["final_visitor_score"]
-    if row["recommended_total"] == "over":
+    if row["total_pick"] == "over":
         return actual_total > row["total_line"]
-    if row["recommended_total"] == "under":
+    if row["total_pick"] == "under":
         return actual_total < row["total_line"]
     return False
 
@@ -127,13 +127,13 @@ def run_review() -> None:
 
         spread_hit = (
             actual_margin > p["spread"]
-            if p["recommended_side"] == "home"
+            if p["spread_pick"] == "home"
             else actual_margin < p["spread"]
         )
 
         ou_hit = (
             actual_total > p["total_line"]
-            if p["recommended_total"] == "over"
+            if p["total_pick"] == "over"
             else actual_total < p["total_line"]
         )
 

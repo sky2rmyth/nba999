@@ -18,11 +18,9 @@ def _reset_client():
     """Reset module-level state between tests."""
     supabase_client._client = None
     supabase_client._available = None
-    supabase_client._table_columns_cache.clear()
     yield
     supabase_client._client = None
     supabase_client._available = None
-    supabase_client._table_columns_cache.clear()
 
 
 # --- _get_client ---
@@ -212,23 +210,14 @@ def test_save_review_result_does_not_raise_on_failure():
     fake_client.table.return_value.upsert.return_value.execute.side_effect = RuntimeError("fail")
     supabase_client._client = fake_client
     supabase_client._available = True
-    # Pre-populate cache so RPC is not called
-    supabase_client._table_columns_cache["review_results"] = {"game_id", "reviewed_at"}
     supabase_client.save_review_result({"game_id": 1})  # should not raise
 
 
 def test_save_review_result_includes_fields():
-    """save_review_result record contains expected fields when all columns exist."""
+    """save_review_result record contains expected fields written directly."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
-
-    # Pre-populate column cache so _get_table_columns is not called
-    supabase_client._table_columns_cache["review_results"] = {
-        "game_id", "game_date", "home_team", "away_team",
-        "spread_pick", "total_pick", "spread_correct", "total_correct",
-        "final_home_score", "final_visitor_score", "reviewed_at",
-    }
 
     supabase_client.save_review_result({
         "game_id": 42,
@@ -249,6 +238,8 @@ def test_save_review_result_includes_fields():
     assert upserted["spread_correct"] is True
     assert upserted["total_correct"] is False
     assert upserted["final_home_score"] == 112
+    assert upserted["home_team"] == "Lakers"
+    assert upserted["away_team"] == "Celtics"
     assert "reviewed_at" in upserted
     # Verify on_conflict is set to game_id
     assert fake_client.table.return_value.upsert.call_args[1]["on_conflict"] == "game_id"
@@ -260,49 +251,27 @@ def test_save_review_result_skips_when_not_configured():
     supabase_client.save_review_result({"game_id": 1})  # should not raise
 
 
-def test_save_review_result_filters_unknown_columns():
-    """save_review_result drops fields not present in the DB table."""
+def test_save_review_result_writes_all_fields():
+    """save_review_result writes all fields directly without filtering."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
-
-    # Simulate a table that only has game_id and reviewed_at columns
-    supabase_client._table_columns_cache["review_results"] = {"game_id", "reviewed_at"}
 
     supabase_client.save_review_result({
         "game_id": 42,
         "home_team": "Lakers",
         "away_team": "Celtics",
         "spread_correct": True,
-        "unknown_field": "ignored",
+        "extra_field": "included",
     })
 
     upserted = fake_client.table.return_value.upsert.call_args[0][0]
     assert upserted["game_id"] == 42
+    assert upserted["home_team"] == "Lakers"
+    assert upserted["away_team"] == "Celtics"
+    assert upserted["spread_correct"] is True
+    assert upserted["extra_field"] == "included"
     assert "reviewed_at" in upserted
-    # Fields not in the DB columns should be excluded
-    assert "home_team" not in upserted
-    assert "away_team" not in upserted
-    assert "spread_correct" not in upserted
-    assert "unknown_field" not in upserted
-
-
-def test_save_review_result_skips_when_columns_unknown():
-    """When column discovery fails, no fields pass filtering and upsert is skipped."""
-    fake_client = mock.MagicMock()
-    supabase_client._client = fake_client
-    supabase_client._available = True
-
-    # Column cache set to None (simulating failed discovery)
-    supabase_client._table_columns_cache["review_results"] = None
-
-    supabase_client.save_review_result({
-        "game_id": 42,
-        "home_team": "Lakers",
-        "extra_field": "kept",
-    })
-
-    fake_client.table.return_value.upsert.assert_not_called()
 
 
 # --- upload_models_to_storage ---
@@ -382,70 +351,35 @@ def test_download_models_returns_false_when_required_missing(tmp_path):
     assert result is False
 
 
-# --- get_table_columns ---
-
-def test_get_table_columns_returns_set():
-    """get_table_columns returns a set of column names."""
-    supabase_client._table_columns_cache["my_table"] = {"id", "name"}
-    assert supabase_client.get_table_columns("my_table") == {"id", "name"}
-
-
-def test_get_table_columns_returns_empty_set_when_unknown():
-    """get_table_columns returns empty set when columns are unknown."""
-    supabase_client._table_columns_cache["my_table"] = None
-    assert supabase_client.get_table_columns("my_table") == set()
-
-
-def test_get_table_columns_returns_empty_set_when_not_configured():
-    """get_table_columns returns empty set without credentials."""
-    supabase_client._available = False
-    assert supabase_client.get_table_columns("any_table") == set()
-
-
-def test_get_table_columns_uses_information_schema():
-    """_get_table_columns queries information_schema.columns via RPC."""
-    fake_client = mock.MagicMock()
-    fake_client.rpc.return_value.execute.return_value = mock.MagicMock(
-        data=[{"column_name": "game_id"}, {"column_name": "score"}]
-    )
-    supabase_client._client = fake_client
-    supabase_client._available = True
-
-    cols = supabase_client.get_table_columns("review_results")
-    assert cols == {"game_id", "score"}
-    fake_client.rpc.assert_called_once()
-    call_args = fake_client.rpc.call_args[0]
-    assert call_args[0] == "sql"
-    assert "information_schema.columns" in call_args[1]["query"]
-    assert "review_results" in call_args[1]["query"]
-
-
 # --- adaptive_upsert ---
 
-def test_adaptive_upsert_filters_columns():
-    """adaptive_upsert drops fields not present in the table."""
+def test_adaptive_upsert_writes_all_fields():
+    """adaptive_upsert writes the full record without filtering."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
-    supabase_client._table_columns_cache["test_table"] = {"game_id", "score"}
 
-    supabase_client.adaptive_upsert("test_table", {"game_id": 1, "score": 100, "extra": "ignored"})
+    supabase_client.adaptive_upsert("test_table", {"game_id": 1, "score": 100, "extra": "included"})
 
     upserted = fake_client.table.return_value.upsert.call_args[0][0]
-    assert upserted == {"game_id": 1, "score": 100}
-    assert "extra" not in upserted
+    assert upserted == {"game_id": 1, "score": 100, "extra": "included"}
 
 
-def test_adaptive_upsert_skips_when_columns_unknown():
-    """adaptive_upsert skips upsert when column discovery returns None."""
+def test_adaptive_upsert_retries_on_failure():
+    """adaptive_upsert retries once when the first upsert fails."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
-    supabase_client._table_columns_cache["test_table"] = None
 
-    supabase_client.adaptive_upsert("test_table", {"game_id": 1, "extra": "kept"})
+    # First call fails, second succeeds
+    fake_client.table.return_value.upsert.return_value.execute.side_effect = [
+        RuntimeError("transient"),
+        mock.MagicMock(),
+    ]
 
-    fake_client.table.return_value.upsert.assert_not_called()
+    supabase_client.adaptive_upsert("test_table", {"game_id": 1})
+
+    assert fake_client.table.return_value.upsert.return_value.execute.call_count == 2
 
 
 def test_adaptive_upsert_skips_when_not_configured():
@@ -454,24 +388,11 @@ def test_adaptive_upsert_skips_when_not_configured():
     supabase_client.adaptive_upsert("test_table", {"game_id": 1})  # should not raise
 
 
-def test_adaptive_upsert_skips_when_no_valid_columns():
-    """adaptive_upsert does nothing when all columns are filtered out."""
-    fake_client = mock.MagicMock()
-    supabase_client._client = fake_client
-    supabase_client._available = True
-    supabase_client._table_columns_cache["test_table"] = {"id"}
-
-    supabase_client.adaptive_upsert("test_table", {"extra": "no_match"})
-
-    fake_client.table.return_value.upsert.assert_not_called()
-
-
 def test_adaptive_upsert_custom_conflict():
     """adaptive_upsert passes through the conflict parameter."""
     fake_client = mock.MagicMock()
     supabase_client._client = fake_client
     supabase_client._available = True
-    supabase_client._table_columns_cache["test_table"] = {"id", "value"}
 
     supabase_client.adaptive_upsert("test_table", {"id": 1, "value": "x"}, conflict="id")
 

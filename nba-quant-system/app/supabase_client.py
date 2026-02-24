@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 _client: Any = None
 _available: bool | None = None
-_table_columns_cache: dict[str, set[str] | None] = {}
 
 
 def _get_client() -> Any:
@@ -55,71 +54,33 @@ def _ensure_tables() -> None:
             logger.warning("Supabase table '%s' not accessible — create it in Supabase dashboard", table)
 
 
-def _get_table_columns(table: str) -> set[str] | None:
-    """Discover column names for *table* from ``information_schema.columns``.
-
-    Uses a Supabase RPC call to query the real PostgreSQL schema so that
-    columns are returned even when the table is empty.  The result is
-    cached so the query runs at most once per process.
-    """
-    if table in _table_columns_cache:
-        return _table_columns_cache[table]
-
-    client = _get_client()
-    if client is None:
-        return None
-
-    try:
-        safe_table = "".join(c for c in table if c.isalnum() or c == "_")
-        sql = (
-            "SELECT column_name FROM information_schema.columns"
-            f" WHERE table_name = '{safe_table}'"
-        )
-        resp = client.rpc("sql", {"query": sql}).execute()
-        if resp.data:
-            columns = {row["column_name"] for row in resp.data}
-            _table_columns_cache[table] = columns
-            logger.debug("Discovered columns for '%s': %s", table, columns)
-            return columns
-    except Exception:
-        logger.debug("Could not discover columns for table '%s'", table, exc_info=True)
-
-    _table_columns_cache[table] = None
-    return None
-
-
-def get_table_columns(table: str) -> set[str]:
-    """Return known column names for *table*.
-
-    Public wrapper around ``_get_table_columns``.  Returns an empty set when
-    the columns cannot be determined (table empty or Supabase unavailable).
-    """
-    return _get_table_columns(table) or set()
-
-
 def adaptive_upsert(
     table: str,
     record: dict[str, Any],
     conflict: str = "game_id",
 ) -> None:
-    """Upsert *record* into *table*, automatically filtering unknown columns.
+    """Upsert *record* into *table* directly without reading schema first.
 
-    Only fields whose names match existing columns (discovered from
-    ``information_schema``) are written.  When column discovery fails,
-    no data is written to prevent crashes from unknown column names.
+    Writes the full record as-is.  If the first attempt fails the upsert
+    is retried once so that transient errors are handled gracefully.
     """
     client = _get_client()
     if client is None:
         return
 
-    cols = get_table_columns(table)
-    filtered = {k: v for k, v in record.items() if k in cols}
-
-    if not filtered:
-        logger.warning("No valid columns to write for table '%s'. Attempted: %s", table, list(record.keys()))
-        return
-
-    client.table(table).upsert(filtered, on_conflict=conflict).execute()
+    try:
+        client.table(table).upsert(record, on_conflict=conflict).execute()
+        logger.info("Upserted record to '%s': %s", table, record.get("game_id"))
+    except Exception as exc:
+        logger.warning("UPSERT FAILED for '%s': %s", table, exc)
+        # Retry once after a short delay
+        import time
+        time.sleep(0.5)
+        try:
+            client.table(table).upsert(record, on_conflict=conflict).execute()
+            logger.info("Upserted after retry to '%s': %s", table, record.get("game_id"))
+        except Exception as exc2:
+            logger.error("FINAL UPSERT FAILED for '%s': %s", table, exc2)
 
 
 def save_prediction(row: dict[str, Any]) -> None:
@@ -190,8 +151,6 @@ def save_review_result(row: dict[str, Any]) -> None:
 
     Each game_id appears only once in the ``review_results`` table.  If a
     result already exists for the game, it is updated instead of duplicated.
-    Uses ``adaptive_upsert`` so that unknown columns are silently dropped
-    and schema changes never crash the workflow.
     """
     record = dict(row)
     record.setdefault("reviewed_at", datetime.now(timezone.utc).isoformat())

@@ -215,77 +215,54 @@ class TestChineseOutput:
 # ---------- Review safety (Requirement 9) ----------
 
 class TestReviewSafety:
-    def test_review_sends_no_games_message_when_no_finished_games(self):
-        """Review gracefully exits with message when no finished games."""
-        with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
-            mock_client = MockClient.return_value
-            mock_client.get_game.return_value = {"id": 1, "status": "In Progress"}
-            with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
-                mock_fetch.return_value = [
-                    {"game_id": 1, "payload": {"spread_pick": "home", "total_pick": "大分"}},
-                ]
-                with mock.patch("app.review_engine.send_message") as mock_send:
+    def test_review_generates_report_with_predictions(self, tmp_path):
+        """Review generates review_latest.json when predictions exist."""
+        predictions = [
+            {
+                "game_id": 1, "spread": 5, "total_line": 220,
+                "recommended_side": "home", "recommended_total": "over",
+                "created_at": "2025-01-15T01:00:00",
+            },
+        ]
+        with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
+            with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
+                mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
+                import os
+                old_cwd = os.getcwd()
+                os.chdir(tmp_path)
+                try:
                     from app.review_engine import run_review
                     run_review()
+                finally:
+                    os.chdir(old_cwd)
 
-            assert mock_send.call_count == 1
-            sent_text = mock_send.call_args[0][0]
-            assert "当前没有可复盘比赛" in sent_text
+        import json
+        report = json.loads((tmp_path / "review_latest.json").read_text())
+        assert report["games"] == 1
+        assert "spread_hit_rate" in report
+        assert "total_hit_rate" in report
 
-    def test_review_sends_no_games_when_empty_response(self):
-        """Review gracefully exits when there are no predictions."""
-        with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
-            mock_fetch.return_value = []
-            with mock.patch("app.review_engine.send_message") as mock_send:
-                from app.review_engine import run_review
-                run_review()
+    def test_review_uses_predictions_snapshot(self):
+        """Review loads predictions from predictions_snapshot via load_latest_predictions."""
+        with mock.patch("app.review_engine.load_latest_predictions", return_value=[]) as mock_load:
+            from app.review_engine import run_review
+            run_review()  # empty predictions should not crash
+            mock_load.assert_called_once()
 
-            sent_text = mock_send.call_args[0][0]
-            assert "当前没有可复盘比赛" in sent_text
+    def test_review_does_not_import_save_review_result(self):
+        """Review engine no longer depends on save_review_result."""
+        import inspect
+        from app import review_engine
+        source = inspect.getsource(review_engine)
+        assert "save_review_result" not in source
 
-    def test_review_does_not_crash_on_api_error(self):
-        """Review doesn't crash when API raises an exception."""
-        with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
-            mock_client = MockClient.return_value
-            mock_client.get_game.side_effect = RuntimeError("API error")
-            with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
-                mock_fetch.return_value = [
-                    {"game_id": 1, "payload": {"spread_pick": "home", "total_pick": "大分"}},
-                ]
-                with mock.patch("app.review_engine.send_message") as mock_send:
-                    from app.review_engine import run_review
-                    run_review()
-
-            sent_text = mock_send.call_args[0][0]
-            assert "当前没有可复盘比赛" in sent_text
-
-    def test_review_deduplicates_predictions_by_game_id(self):
-        """Review uses only the latest prediction per game_id."""
-        with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
-            mock_client = MockClient.return_value
-            mock_client.get_game.return_value = {
-                "id": 1, "status": "Final",
-                "home_team_score": 110, "visitor_team_score": 105,
-            }
-            with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
-                mock_fetch.return_value = [
-                    {"game_id": 1, "created_at": "2025-01-15T01:00:00",
-                     "payload": {"spread_pick": "home", "total_pick": "大分"}},
-                    {"game_id": 1, "created_at": "2025-01-15T02:00:00",
-                     "payload": {"spread_pick": "away", "total_pick": "小分"}},
-                ]
-                with mock.patch("app.review_engine.send_message") as mock_send:
-                    with mock.patch("app.supabase_client.save_review_result") as mock_save:
-                        with mock.patch("app.review_engine.ensure_models"):
-                            from app.review_engine import run_review
-                            run_review()
-
-                # Only one review result saved (deduped)
-                assert mock_save.call_count == 1
-                saved = mock_save.call_args[0][0]
-                # The latest prediction (away/小分) should be used
-                assert saved["spread_pick"] == "away"
-                assert saved["total_pick"] == "小分"
+    def test_review_does_not_query_review_results(self):
+        """Review engine no longer queries review_results table."""
+        import inspect
+        from app import review_engine
+        source = inspect.getsource(review_engine)
+        assert "review_results" not in source
+        assert "fetch_recent_review_results" not in source
 
 
 # ---------- Deduplication helper ----------

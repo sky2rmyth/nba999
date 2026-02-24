@@ -219,25 +219,26 @@ class TestReviewSafety:
         """Review gracefully exits with message when no finished games."""
         with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
             mock_client = MockClient.return_value
-            mock_client.games.return_value = [
-                {"id": 1, "status": "In Progress"},
-            ]
-            with mock.patch("app.review_engine.send_message") as mock_send:
-                from app.review_engine import run_review
-                run_review("2025-01-15")
+            mock_client.get_game.return_value = {"id": 1, "status": "In Progress"}
+            with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
+                mock_fetch.return_value = [
+                    {"game_id": 1, "payload": {"spread_pick": "home", "total_pick": "大分"}},
+                ]
+                with mock.patch("app.review_engine.send_message") as mock_send:
+                    from app.review_engine import run_review
+                    run_review()
 
             assert mock_send.call_count == 1
             sent_text = mock_send.call_args[0][0]
             assert "当前没有可复盘比赛" in sent_text
 
     def test_review_sends_no_games_when_empty_response(self):
-        """Review gracefully exits when API returns no games."""
-        with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
-            mock_client = MockClient.return_value
-            mock_client.games.return_value = []
+        """Review gracefully exits when there are no predictions."""
+        with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
+            mock_fetch.return_value = []
             with mock.patch("app.review_engine.send_message") as mock_send:
                 from app.review_engine import run_review
-                run_review("2025-01-15")
+                run_review()
 
             sent_text = mock_send.call_args[0][0]
             assert "当前没有可复盘比赛" in sent_text
@@ -246,10 +247,14 @@ class TestReviewSafety:
         """Review doesn't crash when API raises an exception."""
         with mock.patch("app.review_engine.BallDontLieClient") as MockClient:
             mock_client = MockClient.return_value
-            mock_client.games.side_effect = RuntimeError("API error")
-            with mock.patch("app.review_engine.send_message") as mock_send:
-                from app.review_engine import run_review
-                run_review("2025-01-15")
+            mock_client.get_game.side_effect = RuntimeError("API error")
+            with mock.patch("app.supabase_client.fetch_all_predictions") as mock_fetch:
+                mock_fetch.return_value = [
+                    {"game_id": 1, "payload": {"spread_pick": "home", "total_pick": "大分"}},
+                ]
+                with mock.patch("app.review_engine.send_message") as mock_send:
+                    from app.review_engine import run_review
+                    run_review()
 
             sent_text = mock_send.call_args[0][0]
             assert "当前没有可复盘比赛" in sent_text

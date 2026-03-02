@@ -33,11 +33,6 @@ MIN_SIMULATION_COUNT = 10000
 MC_WEIGHT = 0.6
 CLASSIFIER_WEIGHT = 0.4
 
-# When real market total lines are available, anchor the model's predicted
-# total toward the market line.  This reduces systematic bias — the market
-# embeds injury/rest/matchup information that the model may lack.
-MARKET_TOTAL_ANCHOR = 0.15
-
 
 def _verify_models_present() -> bool:
     return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
@@ -175,23 +170,18 @@ def run_prediction(target_date: str | None = None) -> None:
             except Exception:
                 logger.warning("betting_odds unavailable for game %s", game_id, exc_info=True)
 
-        # --- Build features and predict scores ---
-        feat = _build_prediction_features(home["id"], vis["id"])
-
-        predicted_home_score = float(model_bundle.home_score_model.predict(feat)[0])
-        predicted_away_score = float(model_bundle.away_score_model.predict(feat)[0])
-
-        predicted_margin = predicted_home_score - predicted_away_score
-        predicted_total = predicted_home_score + predicted_away_score
-
-        # --- BOTH FAILED: use model-derived fallback lines ---
+        # --- BOTH FAILED: skip prediction ---
         if odds_source == "NONE":
-            logger.warning("Odds Source: NONE (game %s) – using model-derived lines", game_id)
-            opening_spread = 0.0
-            live_spread = 0.0
-            opening_total = predicted_total
-            live_total = predicted_total
-            odds_source = "MODEL"
+            logger.warning("Odds Source: NONE (game %s) – skipping prediction", game_id)
+            lines.extend(
+                [
+                    f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
+                    "盘口：暂无数据",
+                    "",
+                    "━━━━━━━━━━━━━━━━",
+                ]
+            )
+            continue
 
         odds_valid_count += 1
 
@@ -201,20 +191,17 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("  Opening Total: %s", opening_total)
         logger.info("  Live Total: %s", live_total)
 
+        # --- Build features and predict scores ---
+        feat = _build_prediction_features(home["id"], vis["id"])
+
+        predicted_home_score = float(model_bundle.home_score_model.predict(feat)[0])
+        predicted_away_score = float(model_bundle.away_score_model.predict(feat)[0])
+
+        predicted_margin = predicted_home_score - predicted_away_score
+        predicted_total = predicted_home_score + predicted_away_score
+
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
-
-        # --- Market-anchored total adjustment ---
-        # When real market lines are available, nudge the predicted total
-        # toward the market total.  The adjustment is split equally between
-        # home and away so the predicted *margin* (spread) is preserved.
-        if odds_source != "MODEL" and live_total is not None:
-            anchor_total = (1.0 - MARKET_TOTAL_ANCHOR) * predicted_total + MARKET_TOTAL_ANCHOR * live_total
-            total_adj = (anchor_total - predicted_total) / 2.0
-            predicted_home_score += total_adj
-            predicted_away_score += total_adj
-            predicted_total = predicted_home_score + predicted_away_score
-            logger.info("Market-anchored Total: %.1f (adj %.1f)", predicted_total, total_adj)
 
         # --- Hybrid: Spread Cover & Total model predictions ---
         spread_cover_prob_model = None
@@ -281,7 +268,7 @@ def run_prediction(target_date: str | None = None) -> None:
         else:
             combined_total_prob = mc_total_prob
 
-        if combined_total_prob > 0.5:
+        if predicted_total > live_total:
             total_pick = "大分"
         else:
             total_pick = "小分"

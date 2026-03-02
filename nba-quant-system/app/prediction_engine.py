@@ -33,6 +33,11 @@ MIN_SIMULATION_COUNT = 10000
 MC_WEIGHT = 0.6
 CLASSIFIER_WEIGHT = 0.4
 
+# When real market total lines are available, anchor the model's predicted
+# total toward the market line.  This reduces systematic bias — the market
+# embeds injury/rest/matchup information that the model may lack.
+MARKET_TOTAL_ANCHOR = 0.15
+
 
 def _verify_models_present() -> bool:
     return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
@@ -198,6 +203,18 @@ def run_prediction(target_date: str | None = None) -> None:
 
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
+
+        # --- Market-anchored total adjustment ---
+        # When real market lines are available, nudge the predicted total
+        # toward the market total.  The adjustment is split equally between
+        # home and away so the predicted *margin* (spread) is preserved.
+        if odds_source != "MODEL" and live_total is not None:
+            anchor_total = (1.0 - MARKET_TOTAL_ANCHOR) * predicted_total + MARKET_TOTAL_ANCHOR * live_total
+            total_adj = (anchor_total - predicted_total) / 2.0
+            predicted_home_score += total_adj
+            predicted_away_score += total_adj
+            predicted_total = predicted_home_score + predicted_away_score
+            logger.info("Market-anchored Total: %.1f (adj %.1f)", predicted_total, total_adj)
 
         # --- Hybrid: Spread Cover & Total model predictions ---
         spread_cover_prob_model = None

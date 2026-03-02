@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 
+# Pace correlation: NBA games share pace, so when one team scores more
+# possessions the opponent also gets more possessions.  A positive
+# correlation between home/away scores produces a wider *total*
+# distribution that better matches real NBA variance, improving
+# over/under probability calibration.
+PACE_CORRELATION = 0.30
+
 
 def run_possession_simulation(
     game_id: int,
@@ -19,8 +26,16 @@ def run_possession_simulation(
     home_std = max(np.sqrt(home_variance), 8.0)
     away_std = max(np.sqrt(away_variance), 8.0)
 
-    home_scores = rng.normal(predicted_home_score, home_std, n_sim)
-    away_scores = rng.normal(predicted_away_score, away_std, n_sim)
+    # Use correlated bivariate normal to model shared-pace effect.
+    cov_matrix = [
+        [home_std ** 2, PACE_CORRELATION * home_std * away_std],
+        [PACE_CORRELATION * home_std * away_std, away_std ** 2],
+    ]
+    scores = rng.multivariate_normal(
+        [predicted_home_score, predicted_away_score], cov_matrix, n_sim,
+    )
+    home_scores = scores[:, 0]
+    away_scores = scores[:, 1]
 
     # Clip to reasonable NBA score ranges (historical min ~60, max ~160)
     home_scores = np.clip(home_scores, 70, 170)

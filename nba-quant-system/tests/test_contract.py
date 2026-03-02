@@ -169,6 +169,32 @@ class TestMonteCarlo:
         for field in required_fields:
             assert field in result, f"Missing field: {field}"
 
+    def test_pace_correlation_widens_total_distribution(self):
+        """Correlated scores should produce a wider total std than independent draws."""
+        from app.game_simulator import run_possession_simulation, PACE_CORRELATION
+        assert PACE_CORRELATION > 0, "PACE_CORRELATION must be positive"
+        result = run_possession_simulation(
+            game_id=77777,
+            predicted_home_score=110.0,
+            predicted_away_score=108.0,
+            home_variance=100.0,
+            away_variance=100.0,
+            spread_line=-2.0,
+            total_line=218.0,
+        )
+        # With correlation 0.30 and std=10 each, expected total_std ≈
+        # sqrt(100 + 100 + 2*0.3*10*10) = sqrt(260) ≈ 16.1
+        # Without correlation it would be sqrt(200) ≈ 14.1
+        assert result["total_std"] > 14.5
+
+    def test_pace_correlation_constant_is_valid(self):
+        from app.game_simulator import PACE_CORRELATION
+        assert 0 < PACE_CORRELATION < 1
+
+    def test_market_total_anchor_constant(self):
+        from app.prediction_engine import MARKET_TOTAL_ANCHOR
+        assert 0 < MARKET_TOTAL_ANCHOR < 1
+
 
 # ---------- Chinese language (Requirement 2) ----------
 

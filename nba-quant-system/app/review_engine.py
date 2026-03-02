@@ -242,14 +242,27 @@ def parse_prediction(row: dict) -> dict:
     predicted_margin = sim.get("predicted_margin")
     predicted_total = sim.get("predicted_total")
 
-    spread_pick = (
-        "home" if predicted_margin is not None and predicted_margin > 0 else "away"
-    )
+    # Prefer stored picks from prediction payload
+    stored_spread = str(payload.get("spread_pick", ""))
+    if "主队" in stored_spread:
+        spread_pick = "home"
+    elif "客队" in stored_spread:
+        spread_pick = "away"
+    else:
+        spread_pick = (
+            "home" if predicted_margin is not None and predicted_margin > 0 else "away"
+        )
 
-    total_pick = (
-        "over" if predicted_total is not None and total_rating.get("total_confidence", 0) > 50
-        else "under"
-    )
+    stored_total = str(payload.get("total_pick", ""))
+    if stored_total == "大分":
+        total_pick = "over"
+    elif stored_total == "小分":
+        total_pick = "under"
+    else:
+        total_pick = (
+            "over" if predicted_total is not None and total_rating.get("total_confidence", 0) > 50
+            else "under"
+        )
 
     return {
         "game_id": row["game_id"],
@@ -263,8 +276,9 @@ def parse_prediction(row: dict) -> dict:
 def extract_prediction_fields(p: dict) -> tuple[str, str]:
     """Extract spread and total picks from a raw Supabase prediction row.
 
-    Returns ``(spread_pick, total_pick)`` derived from the nested
-    ``payload.details.simulation`` structure.
+    Returns ``(spread_pick, total_pick)`` derived from the stored prediction
+    payload, falling back to ``payload.details.simulation`` when stored picks
+    are not available.
     """
     payload = p.get("payload", {})
     details = payload.get("details", {})
@@ -273,8 +287,22 @@ def extract_prediction_fields(p: dict) -> tuple[str, str]:
     predicted_margin = sim.get("predicted_margin")
     predicted_total = sim.get("predicted_total")
 
-    spread_pick = "home" if predicted_margin and predicted_margin > 0 else "away"
-    total_pick = "over" if predicted_total and predicted_total > 0 else "under"
+    # Prefer stored picks from prediction payload
+    stored_spread = str(payload.get("spread_pick", ""))
+    if "主队" in stored_spread:
+        spread_pick = "home"
+    elif "客队" in stored_spread:
+        spread_pick = "away"
+    else:
+        spread_pick = "home" if predicted_margin and predicted_margin > 0 else "away"
+
+    stored_total = str(payload.get("total_pick", ""))
+    if stored_total == "大分":
+        total_pick = "over"
+    elif stored_total == "小分":
+        total_pick = "under"
+    else:
+        total_pick = "over" if predicted_total and predicted_total > 0 else "under"
 
     return spread_pick, total_pick
 
@@ -369,9 +397,13 @@ def run_review() -> None:
             print("NO RESULT FOUND:", game_id)
             continue
 
-        market = p.get("payload", {}).get("details", {}).get("market", {})
-        spread_line = market.get("closing_spread", 0)
-        total_line = market.get("closing_total", 0)
+        payload_data = p.get("payload", {})
+        spread_line = payload_data.get("spread_line") or payload_data.get("live_spread") or 0
+        total_line = payload_data.get("total_line") or payload_data.get("live_total") or 0
+
+        if not total_line or not spread_line:
+            logger.warning("Missing market lines for game %s — skipping review", game_id)
+            continue
 
         final_home = result["home_score"]
         final_visitor = result["visitor_score"]

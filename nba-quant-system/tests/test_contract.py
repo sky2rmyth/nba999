@@ -262,10 +262,15 @@ class TestReviewSafety:
         predictions = [
             {
                 "game_id": 1,
-                "spread_pick": "home",
-                "total_pick": "over",
-                "predicted_margin": 5.0,
-                "predicted_total": 215.0,
+                "payload": {
+                    "spread_pick": "home",
+                    "total_pick": "大分",
+                    "spread_line": -3.5,
+                    "total_line": 220.5,
+                    "details": {
+                        "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                    },
+                },
             },
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):

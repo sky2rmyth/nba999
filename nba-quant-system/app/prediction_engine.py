@@ -268,7 +268,7 @@ def run_prediction(target_date: str | None = None) -> None:
         else:
             combined_total_prob = mc_total_prob
 
-        if predicted_total > live_total:
+        if combined_total_prob > 0.5:
             total_pick = "大分"
         else:
             total_pick = "小分"

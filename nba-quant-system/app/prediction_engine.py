@@ -170,27 +170,6 @@ def run_prediction(target_date: str | None = None) -> None:
             except Exception:
                 logger.warning("betting_odds unavailable for game %s", game_id, exc_info=True)
 
-        # --- BOTH FAILED: skip prediction ---
-        if odds_source == "NONE":
-            logger.warning("Odds Source: NONE (game %s) – skipping prediction", game_id)
-            lines.extend(
-                [
-                    f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
-                    "盘口：暂无数据",
-                    "",
-                    "━━━━━━━━━━━━━━━━",
-                ]
-            )
-            continue
-
-        odds_valid_count += 1
-
-        logger.info("Loaded odds for game %s", game_id)
-        logger.info("  Opening Spread: %s", opening_spread)
-        logger.info("  Live Spread: %s", live_spread)
-        logger.info("  Opening Total: %s", opening_total)
-        logger.info("  Live Total: %s", live_total)
-
         # --- Build features and predict scores ---
         feat = _build_prediction_features(home["id"], vis["id"])
 
@@ -199,6 +178,23 @@ def run_prediction(target_date: str | None = None) -> None:
 
         predicted_margin = predicted_home_score - predicted_away_score
         predicted_total = predicted_home_score + predicted_away_score
+
+        # --- BOTH FAILED: use model-derived fallback lines ---
+        if odds_source == "NONE":
+            logger.warning("Odds Source: NONE (game %s) – using model-derived lines", game_id)
+            opening_spread = 0.0
+            live_spread = 0.0
+            opening_total = predicted_total
+            live_total = predicted_total
+            odds_source = "MODEL"
+
+        odds_valid_count += 1
+
+        logger.info("Loaded odds for game %s", game_id)
+        logger.info("  Opening Spread: %s", opening_spread)
+        logger.info("  Live Spread: %s", live_spread)
+        logger.info("  Opening Total: %s", opening_total)
+        logger.info("  Live Total: %s", live_total)
 
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)

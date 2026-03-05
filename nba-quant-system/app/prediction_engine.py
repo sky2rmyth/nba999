@@ -49,6 +49,71 @@ PROB_RAW_WEIGHT = 0.7
 PROB_NEUTRAL_WEIGHT = 0.3
 NEUTRAL_PROBABILITY = 0.5
 
+ICON_CORE = "⭐"
+ICON_RECOMMEND = "✅"
+ICON_NO = "❌"
+ICON_OVER = "🟢"
+ICON_UNDER = "🔵"
+
+
+def build_pick_icon(is_core, is_recommend, direction):
+
+    if direction == "over":
+        d = ICON_OVER + "大"
+    else:
+        d = ICON_UNDER + "小"
+
+    if is_core:
+        return ICON_CORE + d
+
+    if is_recommend:
+        return ICON_RECOMMEND + d
+
+    return ICON_NO
+
+
+def build_prediction_table(games):
+
+    lines = []
+
+    header = (
+        "比赛 | 盘口 | 模型 | Edge | 概率 | 区间 | 推荐\n"
+        "------------------------------------------------"
+    )
+
+    lines.append(header)
+
+    for g in games:
+
+        match = f"{g['away']} vs {g['home']}"
+        line = g["line"]
+        model = round(g["pred_total"], 1)
+        edge = round(g["edge"], 1)
+
+        prob = int(g["prob"] * 100)
+
+        interval = f"{int(g['low'])}-{int(g['high'])}"
+
+        pick = build_pick_icon(
+            g["is_core"],
+            g["is_recommend"],
+            g["direction"]
+        )
+
+        row = (
+            f"{match} | "
+            f"{line} | "
+            f"{model} | "
+            f"{edge:+} | "
+            f"{prob}% | "
+            f"{interval} | "
+            f"{pick}"
+        )
+
+        lines.append(row)
+
+    return "\n".join(lines)
+
 
 def _verify_models_present() -> bool:
     return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
@@ -134,7 +199,6 @@ def run_prediction(target_date: str | None = None) -> None:
     # --- Monte Carlo phase ---
     progress.advance(3)
 
-    lines = [f"🏀 NBA量化预测｜{target_date}", "", "━━━━━━━━━━━━━━━━"]
     saved_count = 0
     odds_valid_count = 0
     telegram_count = 0
@@ -439,6 +503,8 @@ def run_prediction(target_date: str | None = None) -> None:
             "over_probability": over_probability,
             "under_probability": under_probability,
             "total_range": total_range,
+            "low": sim['total_5pct'],
+            "high": sim['total_95pct'],
             "reason": reason,
             "signal_score": signal_score,
             "odds_source": odds_source,
@@ -458,41 +524,26 @@ def run_prediction(target_date: str | None = None) -> None:
     else:
         sorted_results = []
 
-    # --- Build output for all games ---
+    # --- Build table output for all games ---
+    predictions = []
     for gr in sorted_results:
-        edge_sign = "+" if gr["total_edge_pts"] >= 0 else ""
-        rec_text = "是" if gr["recommended"] else "否"
-        total_display = f"{gr['live_total']:.1f}" if gr["odds_source"] != "NONE" else "暂无数据"
-        lines.extend([
-            f"{zh_name(gr['vis']['full_name'])} vs {zh_name(gr['home']['full_name'])}",
-            "",
-            f"盘口",
-            total_display,
-            "",
-            f"模型预测",
-            f"{gr['predicted_total']:.1f}",
-            "",
-            f"Edge",
-            f"{edge_sign}{gr['total_edge_pts']:.1f}",
-            "",
-            f"概率",
-            f"大分 {gr['over_probability']:.0%}",
-            f"小分 {gr['under_probability']:.0%}",
-            "",
-            f"模拟区间",
-            gr["total_range"],
-            "",
-            f"推荐",
-            rec_text,
-            "",
-            f"原因",
-            f"{gr['reason']}",
-            "",
-            f"重心",
-            f"{'是' if gr['is_core'] else '否'}",
-            "",
-            "━━━━━━━━━━━━━━━━",
-        ])
+        direction = "over" if gr["total_edge_pts"] >= 0 else "under"
+        prob = gr["over_probability"] if direction == "over" else gr["under_probability"]
+        predictions.append({
+            "away": zh_name(gr["vis"]["full_name"]),
+            "home": zh_name(gr["home"]["full_name"]),
+            "line": gr["live_total"],
+            "pred_total": gr["predicted_total"],
+            "edge": gr["total_edge_pts"],
+            "prob": prob,
+            "low": gr["low"],
+            "high": gr["high"],
+            "direction": direction,
+            "is_core": gr["is_core"],
+            "is_recommend": gr["recommended"],
+        })
+
+    table = build_prediction_table(predictions)
 
     # --- Saving phase ---
     progress.advance(4)
@@ -514,7 +565,8 @@ def run_prediction(target_date: str | None = None) -> None:
     logger.info("Model version: %s", model_bundle.version)
 
     # --- Step 10: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
-    send_message("\n".join(lines))
+    msg = f"\n🏀 NBA量化预测｜{target_date}\n\n{table}\n"
+    send_message(msg)
     logger.info("Telegram message sent successfully")
 
     # --- Completed ---

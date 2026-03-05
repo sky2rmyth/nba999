@@ -1,6 +1,153 @@
 """Tests for prediction_engine recommendation, signal score, and core pick logic."""
 from __future__ import annotations
 
+from app.prediction_engine import (
+    build_pick_icon,
+    build_prediction_table,
+    ICON_CORE,
+    ICON_RECOMMEND,
+    ICON_NO,
+    ICON_OVER,
+    ICON_UNDER,
+)
+
+
+class TestBuildPickIcon:
+    """Test build_pick_icon returns correct icon combinations."""
+
+    def test_core_over(self):
+        result = build_pick_icon(True, True, "over")
+        assert result == ICON_CORE + ICON_OVER + "大"
+
+    def test_core_under(self):
+        result = build_pick_icon(True, True, "under")
+        assert result == ICON_CORE + ICON_UNDER + "小"
+
+    def test_recommend_over(self):
+        result = build_pick_icon(False, True, "over")
+        assert result == ICON_RECOMMEND + ICON_OVER + "大"
+
+    def test_recommend_under(self):
+        result = build_pick_icon(False, True, "under")
+        assert result == ICON_RECOMMEND + ICON_UNDER + "小"
+
+    def test_not_recommended(self):
+        result = build_pick_icon(False, False, "over")
+        assert result == ICON_NO
+
+    def test_not_recommended_under(self):
+        result = build_pick_icon(False, False, "under")
+        assert result == ICON_NO
+
+    def test_core_takes_priority_over_recommend(self):
+        """When is_core is True, the icon should use ICON_CORE regardless of is_recommend."""
+        result_both = build_pick_icon(True, True, "over")
+        result_core_only = build_pick_icon(True, False, "over")
+        assert result_both == result_core_only == ICON_CORE + ICON_OVER + "大"
+
+
+class TestBuildPredictionTable:
+    """Test build_prediction_table generates correct table format."""
+
+    def _sample_games(self):
+        return [
+            {
+                "away": "猛龙",
+                "home": "森林狼",
+                "line": 227.5,
+                "pred_total": 233.7,
+                "edge": 6.2,
+                "prob": 0.64,
+                "low": 212.3,
+                "high": 255.8,
+                "direction": "over",
+                "is_core": True,
+                "is_recommend": True,
+            },
+            {
+                "away": "独行侠",
+                "home": "魔术",
+                "line": 228.5,
+                "pred_total": 230.4,
+                "edge": 1.9,
+                "prob": 0.58,
+                "low": 208.1,
+                "high": 251.9,
+                "direction": "over",
+                "is_core": False,
+                "is_recommend": False,
+            },
+        ]
+
+    def test_header_present(self):
+        table = build_prediction_table(self._sample_games())
+        assert "比赛 | 盘口 | 模型 | Edge | 概率 | 区间 | 推荐" in table
+
+    def test_separator_present(self):
+        table = build_prediction_table(self._sample_games())
+        assert "------------------------------------------------" in table
+
+    def test_core_game_row(self):
+        table = build_prediction_table(self._sample_games())
+        lines = table.split("\n")
+        # Data rows start at index 2 (0=header, 1=separator)
+        core_row = lines[2]
+        assert "猛龙 vs 森林狼" in core_row
+        assert "227.5" in core_row
+        assert "233.7" in core_row
+        assert "+6.2" in core_row
+        assert "64%" in core_row
+        assert "212-255" in core_row
+        assert ICON_CORE in core_row
+
+    def test_not_recommended_row(self):
+        table = build_prediction_table(self._sample_games())
+        lines = table.split("\n")
+        no_rec_row = lines[3]
+        assert "独行侠 vs 魔术" in no_rec_row
+        assert ICON_NO in no_rec_row
+        assert ICON_CORE not in no_rec_row
+        assert ICON_RECOMMEND not in no_rec_row
+
+    def test_empty_games(self):
+        table = build_prediction_table([])
+        assert "比赛 | 盘口 | 模型 | Edge | 概率 | 区间 | 推荐" in table
+        # Only header + separator, no data rows
+        lines = table.split("\n")
+        assert len(lines) == 2
+
+    def test_all_games_present(self):
+        games = self._sample_games()
+        table = build_prediction_table(games)
+        lines = table.split("\n")
+        # 2 header lines + 2 data rows
+        assert len(lines) == 4
+
+    def test_negative_edge_format(self):
+        games = [{
+            "away": "爵士",
+            "home": "奇才",
+            "line": 243.5,
+            "pred_total": 229.6,
+            "edge": -13.9,
+            "prob": 0.59,
+            "low": 213.0,
+            "high": 246.0,
+            "direction": "under",
+            "is_core": False,
+            "is_recommend": True,
+        }]
+        table = build_prediction_table(games)
+        assert "-13.9" in table
+        assert ICON_RECOMMEND + ICON_UNDER + "小" in table
+
+    def test_pipe_separators(self):
+        """All data rows use pipe separators."""
+        table = build_prediction_table(self._sample_games())
+        lines = table.split("\n")
+        for line in lines[2:]:
+            assert line.count("|") == 6
+
 
 class TestRecommendationReason:
     """Test the recommendation reason thresholds based on abs_edge."""

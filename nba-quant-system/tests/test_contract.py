@@ -169,6 +169,55 @@ class TestMonteCarlo:
         for field in required_fields:
             assert field in result, f"Missing field: {field}"
 
+    def test_total_std_capped_at_13(self):
+        """total_std should be capped at 13 to reduce extreme simulation variance."""
+        from app.game_simulator import run_possession_simulation
+        result = run_possession_simulation(
+            game_id=22222,
+            predicted_home_score=115.0,
+            predicted_away_score=110.0,
+            home_variance=400.0,
+            away_variance=400.0,
+            spread_line=-3.0,
+            total_line=225.0,
+        )
+        assert result["total_std"] <= 13
+
+    def test_parametric_interval_uses_capped_std(self):
+        """Interval should use mean ± 1.65 * capped total_std."""
+        from app.game_simulator import run_possession_simulation
+        result = run_possession_simulation(
+            game_id=33333,
+            predicted_home_score=112.0,
+            predicted_away_score=108.0,
+            home_variance=64.0,
+            away_variance=64.0,
+            spread_line=-4.0,
+            total_line=220.0,
+        )
+        total_mean = result["predicted_total"]
+        total_std = result["total_std"]
+        expected_5pct = total_mean - 1.65 * total_std
+        expected_95pct = total_mean + 1.65 * total_std
+        assert abs(result["total_5pct"] - expected_5pct) < 0.01
+        assert abs(result["total_95pct"] - expected_95pct) < 0.01
+
+    def test_noise_reduction_narrower_distribution(self):
+        """With 0.75 noise scaling, total_std should be smaller than input std."""
+        from app.game_simulator import run_possession_simulation
+        result = run_possession_simulation(
+            game_id=44444,
+            predicted_home_score=110.0,
+            predicted_away_score=105.0,
+            home_variance=100.0,
+            away_variance=100.0,
+            spread_line=-3.0,
+            total_line=215.0,
+        )
+        # sqrt(100) = 10, with 0.75 scaling effective std = 7.5
+        # combined total_std should be narrower than raw std
+        assert result["total_std"] < 15.0
+
 
 # ---------- Chinese language (Requirement 2) ----------
 

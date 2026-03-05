@@ -57,6 +57,13 @@ ICON_UNDER = "🔵"
 
 
 def build_pick_icon(is_core, is_recommend, direction):
+    """Return an icon string for the pick recommendation status.
+
+    Args:
+        is_core: Whether this is the core pick of the day.
+        is_recommend: Whether this game is recommended.
+        direction: 'over' or 'under' indicating the predicted direction.
+    """
 
     if direction == "over":
         d = ICON_OVER + "大"
@@ -73,6 +80,12 @@ def build_pick_icon(is_core, is_recommend, direction):
 
 
 def build_prediction_table(games):
+    """Build a pipe-separated table string for Telegram output.
+
+    Args:
+        games: List of dicts with keys: away, home, line, pred_total,
+               edge, prob, low, high, direction, is_core, is_recommend.
+    """
 
     lines = []
 

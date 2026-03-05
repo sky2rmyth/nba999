@@ -122,6 +122,7 @@ def run_prediction(target_date: str | None = None) -> None:
     saved_count = 0
     odds_valid_count = 0
     telegram_count = 0
+    game_results: list[dict] = []  # Collect per-game data for core pick selection
 
     for idx, g in enumerate(games):
         game_id = g["id"]
@@ -293,6 +294,29 @@ def run_prediction(target_date: str | None = None) -> None:
         )
         clv_projection = round((live_spread - opening_spread) if opening_spread and live_spread else 0.0, 2)
 
+        # --- Total edge & signal score ---
+        total_edge_pts = predicted_total - live_total
+        abs_edge = abs(total_edge_pts)
+        total_std = sim["total_std"]
+        over_probability = combined_total_prob
+
+        signal_score = (
+            abs_edge * 0.6
+            + over_probability * 40
+            - total_std * 0.2
+        )
+
+        # --- Recommendation logic ---
+        if abs_edge >= 6 and over_probability >= 0.62:
+            recommendation = "推荐"
+            reason = "Edge大于6分且概率高于62%，模型信号强"
+        elif abs_edge >= 4 and over_probability >= 0.58:
+            recommendation = "观察"
+            reason = "Edge中等，概率一般，信号中等"
+        else:
+            recommendation = "不推荐"
+            reason = "Edge不足或概率不足，模型信号弱"
+
         # --- Step 6: Save prediction to database ---
         spread_prob = combined_spread_prob
         total_prob = combined_total_prob
@@ -353,29 +377,51 @@ def run_prediction(target_date: str | None = None) -> None:
             **sim,
         })
 
-        # --- Output for every game (no filtering) ---
-        spread_range = f"{sim['spread_5pct']:.1f} → {sim['spread_95pct']:.1f}"
-        total_range = f"{sim['total_5pct']:.1f} → {sim['total_95pct']:.1f}"
+        # --- Collect game result for core pick selection ---
+        total_range = f"{int(sim['total_5pct'])} – {int(sim['total_95pct'])}"
 
+        game_results.append({
+            "idx": len(game_results),
+            "game_id": game_id,
+            "home": home,
+            "vis": vis,
+            "live_total": live_total,
+            "predicted_total": predicted_total,
+            "total_edge_pts": total_edge_pts,
+            "over_probability": over_probability,
+            "total_range": total_range,
+            "recommendation": recommendation,
+            "reason": reason,
+            "signal_score": signal_score,
+        })
+
+    # --- Core pick selection: pick the game with highest signal_score ---
+    core_pick_idx: int | None = None
+    if game_results:
+        core_pick_idx = max(range(len(game_results)), key=lambda i: game_results[i]["signal_score"])
+
+    # --- Build output for all games ---
+    for gr in game_results:
+        is_core = (gr["idx"] == core_pick_idx) if core_pick_idx is not None else False
+        edge_sign = "+" if gr["total_edge_pts"] >= 0 else ""
         lines.extend([
-            f"🏀 {zh_name(vis['full_name'])} @ {zh_name(home['full_name'])}",
-            "------------------------------------------------",
+            f"{zh_name(gr['vis']['full_name'])} vs {zh_name(gr['home']['full_name'])}",
             "",
-            "【让分盘】",
-            f"盘口：{live_spread:+.1f}",
-            f"模型预测分差：{predicted_margin:+.1f}",
-            f"推荐方向：{spread_pick}",
-            f"覆盖概率：{combined_spread_prob:.1%}",
+            f"盘口：{gr['live_total']:.1f}",
             "",
-            f"模拟分差区间：{spread_range}",
+            f"模型预测：{gr['predicted_total']:.1f}",
             "",
-            "【大小分】",
-            f"盘口：{live_total:.1f}",
-            f"模型预测总分：{predicted_total:.1f}",
-            f"推荐方向：{total_pick}",
-            f"概率：{combined_total_prob:.1%}",
+            f"Edge：{edge_sign}{gr['total_edge_pts']:.1f}",
             "",
-            f"模拟总分区间：{total_range}",
+            f"概率：{gr['over_probability']:.0%}",
+            "",
+            f"模拟区间：{gr['total_range']}",
+            "",
+            f"推荐：{gr['recommendation']}",
+            "",
+            f"原因：{gr['reason']}",
+            "",
+            f"重心：{'是' if is_core else '否'}",
             "",
             "━━━━━━━━━━━━━━━━",
         ])

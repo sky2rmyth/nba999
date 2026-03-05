@@ -190,63 +190,33 @@ class TestSpreadHit:
 class TestTotalHit:
     def test_over_hits(self):
         """Actual total exceeds the line."""
-        row = {
-            "final_home_score": 115,
-            "final_visitor_score": 110,
-            "total_pick": "over",
-            "total_line": 220,
-        }
-        assert total_hit(row) is True
+        pred = {"total_pick": "over"}
+        assert total_hit(pred, 115, 110, 220) is True
 
     def test_over_misses(self):
         """Actual total is under the line."""
-        row = {
-            "final_home_score": 100,
-            "final_visitor_score": 105,
-            "total_pick": "over",
-            "total_line": 220,
-        }
-        assert total_hit(row) is False
+        pred = {"total_pick": "over"}
+        assert total_hit(pred, 100, 105, 220) is False
 
     def test_under_hits(self):
         """Actual total is below the line."""
-        row = {
-            "final_home_score": 100,
-            "final_visitor_score": 105,
-            "total_pick": "under",
-            "total_line": 220,
-        }
-        assert total_hit(row) is True
+        pred = {"total_pick": "under"}
+        assert total_hit(pred, 100, 105, 220) is True
 
     def test_under_misses(self):
         """Actual total exceeds the line."""
-        row = {
-            "final_home_score": 115,
-            "final_visitor_score": 110,
-            "total_pick": "under",
-            "total_line": 220,
-        }
-        assert total_hit(row) is False
+        pred = {"total_pick": "under"}
+        assert total_hit(pred, 115, 110, 220) is False
 
     def test_unknown_total_returns_false(self):
         """Unknown total_pick returns False."""
-        row = {
-            "final_home_score": 110,
-            "final_visitor_score": 100,
-            "total_pick": "",
-            "total_line": 220,
-        }
-        assert total_hit(row) is False
+        pred = {"total_pick": ""}
+        assert total_hit(pred, 110, 100, 220) is False
 
     def test_exact_total_equals_line_over(self):
         """Total exactly equals line — not a hit for over."""
-        row = {
-            "final_home_score": 110,
-            "final_visitor_score": 110,
-            "total_pick": "over",
-            "total_line": 220,
-        }
-        assert total_hit(row) is False
+        pred = {"total_pick": "over"}
+        assert total_hit(pred, 110, 110, 220) is False
 
 
 # --- calculate_rates ---
@@ -623,22 +593,24 @@ class TestBuildReviewSummary:
         assert result == "暂无复盘数据"
 
     def test_summary_with_data(self):
-        """Summary includes rates and game count."""
+        """Summary includes OU rate and game count."""
         rows = [
-            {"spread_hit": True, "ou_hit": False, "reviewed_at": "2026-02-20T10:00:00+00:00"},
-            {"spread_hit": False, "ou_hit": True, "reviewed_at": "2026-02-21T10:00:00+00:00"},
+            {"ou_hit": False, "reviewed_at": "2026-02-20T10:00:00+00:00"},
+            {"ou_hit": True, "reviewed_at": "2026-02-21T10:00:00+00:00"},
         ]
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=rows)
         result = build_review_summary(mock_client)
-        assert "复盘报告" in result
+        assert "NBA复盘报告" in result
         assert "50.0%" in result
         assert "复盘场次：2" in result
+        assert "让分命中率" not in result
+        assert "综合胜率" not in result
 
     def test_summary_last30_section(self):
         """Recent rows appear in 30-day rolling section."""
         rows = [
-            {"spread_hit": True, "ou_hit": True, "reviewed_at": "2026-02-20T10:00:00+00:00"},
+            {"ou_hit": True, "reviewed_at": "2026-02-20T10:00:00+00:00"},
         ]
         mock_client = MagicMock()
         mock_client.table.return_value.select.return_value.execute.return_value = MagicMock(data=rows)

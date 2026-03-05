@@ -294,9 +294,8 @@ class TestReviewSafety:
 
         import json
         report = json.loads((tmp_path / "review_latest.json").read_text())
-        assert report["games"] == 1
-        assert "spread_hit_rate" in report
-        assert "total_hit_rate" in report
+        assert report["review_count"] == 1
+        assert "ou_hit_rate" in report
 
     def test_review_uses_predictions(self):
         """Review loads predictions from predictions via load_latest_predictions."""
@@ -344,9 +343,8 @@ class TestReviewSafety:
                         report = json.loads(open("review_latest.json").read())
                     finally:
                         os.chdir(old_cwd)
-                assert report["games"] == 2
-                assert report["spread_hit_rate"] == 0.5
-                assert report["total_hit_rate"] == 0.5
+                assert report["review_count"] == 2
+                assert report["ou_hit_rate"] == 0.5
 
 
 # ---------- Deduplication helper ----------

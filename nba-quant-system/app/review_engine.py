@@ -522,13 +522,14 @@ def build_review_summary(client):
     total_hits = sum(1 for r in records if r["ou_hit"])
     ou_rate = round(total_hits / total_games * 100, 1)
 
-    cutoff = datetime.utcnow() - timedelta(days=30)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
     recent = []
     for r in records:
-        t = datetime.fromisoformat(r["reviewed_at"].replace("Z", ""))
-        if t.tzinfo is not None:
-            t = t.replace(tzinfo=None)
+        raw = r["reviewed_at"].replace("Z", "+00:00")
+        t = datetime.fromisoformat(raw)
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
         if t >= cutoff:
             recent.append(r)
 

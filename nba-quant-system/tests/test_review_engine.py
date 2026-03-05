@@ -190,33 +190,27 @@ class TestSpreadHit:
 class TestTotalHit:
     def test_over_hits(self):
         """Actual total exceeds the line."""
-        pred = {"total_pick": "over"}
-        assert total_hit(pred, 115, 110, 220) is True
+        assert total_hit("over", 115, 110, 220) is True
 
     def test_over_misses(self):
         """Actual total is under the line."""
-        pred = {"total_pick": "over"}
-        assert total_hit(pred, 100, 105, 220) is False
+        assert total_hit("over", 100, 105, 220) is False
 
     def test_under_hits(self):
         """Actual total is below the line."""
-        pred = {"total_pick": "under"}
-        assert total_hit(pred, 100, 105, 220) is True
+        assert total_hit("under", 100, 105, 220) is True
 
     def test_under_misses(self):
         """Actual total exceeds the line."""
-        pred = {"total_pick": "under"}
-        assert total_hit(pred, 115, 110, 220) is False
+        assert total_hit("under", 115, 110, 220) is False
 
     def test_unknown_total_returns_false(self):
         """Unknown total_pick returns False."""
-        pred = {"total_pick": ""}
-        assert total_hit(pred, 110, 100, 220) is False
+        assert total_hit("", 110, 100, 220) is False
 
     def test_exact_total_equals_line_over(self):
         """Total exactly equals line — not a hit for over."""
-        pred = {"total_pick": "over"}
-        assert total_hit(pred, 110, 110, 220) is False
+        assert total_hit("over", 110, 110, 220) is False
 
 
 # --- calculate_rates ---
@@ -224,50 +218,46 @@ class TestTotalHit:
 class TestCalculateRates:
     def test_empty_rows(self):
         """Empty input returns all zeros."""
-        assert calculate_rates([]) == (0, 0, 0)
+        assert calculate_rates([]) == (0, 0)
 
     def test_all_hits(self):
         """100% hit rate returns 1.0 for all rates."""
         rows = [
-            {"spread_hit": True, "ou_hit": True},
-            {"spread_hit": True, "ou_hit": True},
+            {"ou_hit": True},
+            {"ou_hit": True},
         ]
-        s, t, o = calculate_rates(rows)
-        assert s == 1.0
+        t, o = calculate_rates(rows)
         assert t == 1.0
         assert o == 1.0
 
     def test_no_hits(self):
         """0% hit rate returns 0 for all rates."""
         rows = [
-            {"spread_hit": False, "ou_hit": False},
-            {"spread_hit": False, "ou_hit": False},
+            {"ou_hit": False},
+            {"ou_hit": False},
         ]
-        s, t, o = calculate_rates(rows)
-        assert s == 0.0
+        t, o = calculate_rates(rows)
         assert t == 0.0
         assert o == 0.0
 
     def test_mixed_hits(self):
         """Mixed results calculate correctly."""
         rows = [
-            {"spread_hit": True, "ou_hit": False},
-            {"spread_hit": False, "ou_hit": True},
-            {"spread_hit": True, "ou_hit": True},
-            {"spread_hit": False, "ou_hit": False},
+            {"ou_hit": False},
+            {"ou_hit": True},
+            {"ou_hit": True},
+            {"ou_hit": False},
         ]
-        s, t, o = calculate_rates(rows)
-        assert s == 0.5  # 2/4
+        t, o = calculate_rates(rows)
         assert t == 0.5  # 2/4
-        assert o == 0.5  # 4/8
+        assert o == 0.5  # 2/4
 
     def test_single_row(self):
         """Single row with one hit."""
-        rows = [{"spread_hit": True, "ou_hit": False}]
-        s, t, o = calculate_rates(rows)
-        assert s == 1.0
+        rows = [{"ou_hit": False}]
+        t, o = calculate_rates(rows)
         assert t == 0.0
-        assert o == 0.5
+        assert o == 0.0
 
 
 # --- extract_prediction_fields ---
@@ -442,7 +432,7 @@ class TestRunReviewTelegram:
                     "spread_pick": "主队 Los Angeles Lakers -3.5",
                     "details": {
                         "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
-                        "market": {},
+                        "market": {"closing_total": 220.5},
                     }
                 },
             }
@@ -644,11 +634,8 @@ class TestFormatReviewMessage:
             "home_team": "Los Angeles Lakers",
             "visitor_team": "Golden State Warriors",
         }
-        pred = {"spread_pick": "home", "total_pick": "over"}
+        pred = {"total_pick": "over"}
         record = {
-            "spread_line": -3.5,
-            "total_line": 220.5,
-            "spread_hit": True,
             "ou_hit": False,
             "final_home_score": 113,
             "final_visitor_score": 103,
@@ -657,9 +644,7 @@ class TestFormatReviewMessage:
         assert "洛杉矶湖人" in msg
         assert "金州勇士" in msg
         assert "NBA复盘结果" in msg
-        assert "-3.5" in msg
-        assert "220.5" in msg
-        assert "✅命中" in msg
+        assert "over" in msg
         assert "❌未中" in msg
         assert "113" in msg
         assert "103" in msg

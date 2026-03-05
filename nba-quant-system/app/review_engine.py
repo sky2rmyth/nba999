@@ -69,17 +69,25 @@ def spread_hit(row: dict) -> bool:
     return False
 
 
-def total_hit(row: dict) -> bool:
+def total_hit(pred, home_score, away_score, total_line):
     """Determine if a total (over/under) pick was correct.
 
-    Uses ``final_home_score``, ``final_visitor_score``, ``total_pick``,
-    and ``total_line`` fields from *row*.
+    Parameters
+    ----------
+    pred : dict
+        Prediction dict containing ``total_pick`` (``"over"`` or ``"under"``).
+    home_score : int | float
+        Final home team score.
+    away_score : int | float
+        Final away team score.
+    total_line : int | float
+        The over/under line.
     """
-    actual_total = row["final_home_score"] + row["final_visitor_score"]
-    if row["total_pick"] == "over":
-        return actual_total > row["total_line"]
-    if row["total_pick"] == "under":
-        return actual_total < row["total_line"]
+    total = home_score + away_score
+    if pred["total_pick"] == "over":
+        return total > total_line
+    if pred["total_pick"] == "under":
+        return total < total_line
     return False
 
 
@@ -418,13 +426,11 @@ def run_review() -> None:
         print("Review completed. No games to review.")
         return
 
-    spread_rate = sum(int(r["spread_hit"]) for r in review_rows) / n
     total_rate = sum(int(r["ou_hit"]) for r in review_rows) / n
 
     report = {
-        "games": n,
-        "spread_hit_rate": spread_rate,
-        "total_hit_rate": total_rate
+        "review_count": n,
+        "ou_hit_rate": total_rate
     }
 
     with open("review_latest.json", "w") as f:
@@ -506,52 +512,45 @@ def backfill_review_games() -> list[dict]:
 def build_review_summary(client):
     """Build a Chinese-language summary report from all review results."""
     res = client.table("review_results").select("*").execute()
-    rows = res.data or []
+    records = res.data or []
 
-    total_games = len(rows)
+    total_games = len(records)
 
     if total_games == 0:
         return "暂无复盘数据"
 
-    spread_hits = sum(1 for r in rows if r["spread_hit"])
-    total_hits = sum(1 for r in rows if r["ou_hit"])
+    total_hits = sum(1 for r in records if r["ou_hit"])
+    ou_rate = round(total_hits / total_games * 100, 1)
 
-    spread_rate = spread_hits / total_games * 100
-    total_rate = total_hits / total_games * 100
-    overall_rate = (spread_rate + total_rate) / 2
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=30)
-
-    last30 = []
-
-    for r in rows:
-        t = datetime.fromisoformat(r["reviewed_at"])
+    recent = []
+    for r in records:
+        raw = r["reviewed_at"].replace("Z", "+00:00")
+        t = datetime.fromisoformat(raw)
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
         if t >= cutoff:
-            last30.append(r)
+            recent.append(r)
 
-    if len(last30) > 0:
-        s30 = sum(1 for r in last30 if r["spread_hit"])
-        t30 = sum(1 for r in last30 if r["ou_hit"])
-
-        spread30 = s30 / len(last30) * 100
-        total30 = t30 / len(last30) * 100
+    recent_games = len(recent)
+    if recent_games > 0:
+        recent_hits = sum(1 for r in recent if r["ou_hit"])
+        recent_rate = round(recent_hits / recent_games * 100, 1)
     else:
-        spread30 = 0
-        total30 = 0
+        recent_rate = 0
 
-    return f"""📊 复盘报告
+    return f"""📊 NBA复盘报告
 
-让分命中率：{spread_rate:.1f}%
-大小命中率：{total_rate:.1f}%
-综合胜率：{overall_rate:.1f}%
+大小分命中率：{ou_rate}%
 复盘场次：{total_games}
 
 ━━━━━━━━━━━━━━━━
+
 📈 近30天滚动表现
-让分命中率：{spread30:.1f}%
-大小命中率：{total30:.1f}%
-样本数：{len(last30)}
+
+大小分命中率：{recent_rate}%
+样本数：{recent_games}
 """
 
 

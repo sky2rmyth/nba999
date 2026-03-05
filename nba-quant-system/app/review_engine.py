@@ -69,13 +69,13 @@ def spread_hit(row: dict) -> bool:
     return False
 
 
-def total_hit(pred, home_score, away_score, total_line):
+def total_hit(pred_pick, home_score, away_score, total_line):
     """Determine if a total (over/under) pick was correct.
 
     Parameters
     ----------
-    pred : dict
-        Prediction dict containing ``total_pick`` (``"over"`` or ``"under"``).
+    pred_pick : str
+        The pick direction (``"over"`` or ``"under"``).
     home_score : int | float
         Final home team score.
     away_score : int | float
@@ -84,9 +84,9 @@ def total_hit(pred, home_score, away_score, total_line):
         The over/under line.
     """
     total = home_score + away_score
-    if pred["total_pick"] == "over":
+    if pred_pick == "over":
         return total > total_line
-    if pred["total_pick"] == "under":
+    if pred_pick == "under":
         return total < total_line
     return False
 
@@ -180,10 +180,9 @@ def build_review_message(result, pred, spread_result, total_result):
 
 def format_review_message(game, pred, record):
     """Build Chinese Telegram review message using team name mapping."""
-    home = cn(game["home_team"])
-    away = cn(game["visitor_team"])
+    home = cn(game.get("home_team", ""))
+    away = cn(game.get("visitor_team", ""))
 
-    spread_result = "✅命中" if record["spread_hit"] else "❌未中"
     total_result = "✅命中" if record["ou_hit"] else "❌未中"
 
     return (
@@ -192,19 +191,7 @@ def format_review_message(game, pred, record):
         "🏀 对阵：\n"
         f"{away} vs {home}\n"
         "\n"
-        "📉 让分盘口：\n"
-        f"{record['spread_line']}\n"
-        "\n"
-        "模型推荐：\n"
-        f"{pred['spread_pick']}\n"
-        "\n"
-        "结果：\n"
-        f"{spread_result}\n"
-        "\n"
-        "📈 大小分盘口：\n"
-        f"{record['total_line']}\n"
-        "\n"
-        "模型推荐：\n"
+        "📈 大小分推荐：\n"
         f"{pred['total_pick']}\n"
         "\n"
         "结果：\n"
@@ -215,24 +202,22 @@ def format_review_message(game, pred, record):
     )
 
 
-def calculate_rates(rows: list[dict]) -> tuple[float, float, float]:
-    """Compute spread, total, and overall hit rates from review result rows.
+def calculate_rates(rows: list[dict]) -> tuple[float, float]:
+    """Compute total hit rate and overall rate from review result rows.
 
-    Returns ``(spread_rate, total_rate, overall_rate)``.  All values are 0
+    Returns ``(total_rate, overall_rate)``.  All values are 0
     when *rows* is empty.
     """
     if not rows:
-        return 0, 0, 0
+        return 0, 0
 
     n = len(rows)
-    spread_hits = sum(int(r["spread_hit"]) for r in rows)
     total_hits = sum(int(r["ou_hit"]) for r in rows)
 
-    spread_rate = spread_hits / n
     total_rate = total_hits / n
-    overall_rate = (spread_hits + total_hits) / (n * 2)
+    overall_rate = total_rate
 
-    return spread_rate, total_rate, overall_rate
+    return total_rate, overall_rate
 
 
 def parse_prediction(row: dict) -> dict:
@@ -377,37 +362,23 @@ def run_review() -> None:
             print("NO RESULT FOUND:", game_id)
             continue
 
-        market = p.get("payload", {}).get("details", {}).get("market", {})
-        spread_line = market.get("closing_spread", 0)
-        total_line = market.get("closing_total", 0)
+        total_line = p.get("payload", {}).get("details", {}).get("market", {}).get("closing_total", None)
+        if total_line is None:
+            print("NO TOTAL LINE:", game_id)
+            continue
 
         final_home = result["home_score"]
         final_visitor = result["visitor_score"]
 
-        spread_result = calc_spread_hit(
-            pred["spread_pick"],
-            result.get("home_team", ""),
-            result.get("visitor_team", ""),
-            final_home,
-            final_visitor,
-            spread_line,
-        )
-
-        total_result = calc_total_hit(
-            pred["total_pick"],
-            final_home,
-            final_visitor,
-            total_line,
-        )
-
         record = {
             "game_id": game_id,
-            "spread_pick": pred["spread_pick"],
             "total_pick": pred["total_pick"],
-            "spread_line": spread_line,
-            "total_line": total_line,
-            "spread_hit": spread_result,
-            "ou_hit": total_result,
+            "ou_hit": total_hit(
+                pred["total_pick"],
+                final_home,
+                final_visitor,
+                total_line,
+            ),
             "final_home_score": final_home,
             "final_visitor_score": final_visitor,
             "reviewed_at": datetime.now(timezone.utc).isoformat(),

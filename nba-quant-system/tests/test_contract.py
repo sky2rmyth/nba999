@@ -269,18 +269,28 @@ class TestReviewSafety:
         predictions = [
             {
                 "game_id": 1,
-                "spread_pick": "home",
-                "total_pick": "over",
-                "predicted_margin": 5.0,
-                "predicted_total": 215.0,
+                "payload": {
+                    "details": {
+                        "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                        "total_rating": {"total_confidence": 60},
+                        "market": {"closing_total": 220.5},
+                    }
+                },
             },
         ]
         review_rows = [
-            {"game_id": 1, "spread_hit": True, "ou_hit": True},
+            {"game_id": 1, "ou_hit": True},
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
             with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
-                mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
+                mock_fetch.return_value = {
+                    "home_team": "Los Angeles Lakers",
+                    "visitor_team": "Golden State Warriors",
+                    "home_score": 110,
+                    "visitor_score": 105,
+                    "spread": 0,
+                    "total": 0,
+                }
                 with mock.patch("app.supabase_client.save_review_result"):
                     with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):
                         import os
@@ -310,15 +320,25 @@ class TestReviewSafety:
         predictions = [
             {
                 "game_id": 1,
-                "spread_pick": "home",
-                "total_pick": "over",
-                "predicted_margin": 5.0,
-                "predicted_total": 215.0,
+                "payload": {
+                    "details": {
+                        "simulation": {"predicted_margin": 5.0, "predicted_total": 215.0},
+                        "total_rating": {"total_confidence": 60},
+                        "market": {"closing_total": 220.5},
+                    }
+                },
             },
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=predictions):
             with mock.patch("app.review_engine.fetch_game_result") as mock_fetch:
-                mock_fetch.return_value = {"home_score": 110, "visitor_score": 105}
+                mock_fetch.return_value = {
+                    "home_team": "Los Angeles Lakers",
+                    "visitor_team": "Golden State Warriors",
+                    "home_score": 110,
+                    "visitor_score": 105,
+                    "spread": 0,
+                    "total": 0,
+                }
                 with mock.patch("app.supabase_client.save_review_result") as mock_save:
                     with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=[]):
                         from app.review_engine import run_review
@@ -328,8 +348,8 @@ class TestReviewSafety:
     def test_review_computes_rates_from_review_results(self):
         """Hit rates are computed from review_results, not predictions."""
         review_rows = [
-            {"game_id": 1, "spread_hit": True, "ou_hit": False},
-            {"game_id": 2, "spread_hit": False, "ou_hit": True},
+            {"game_id": 1, "ou_hit": False},
+            {"game_id": 2, "ou_hit": True},
         ]
         with mock.patch("app.review_engine.load_latest_predictions", return_value=[]):
             with mock.patch("app.supabase_client.fetch_recent_review_results", return_value=review_rows):

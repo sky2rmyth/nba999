@@ -33,6 +33,22 @@ MIN_SIMULATION_COUNT = 10000
 MC_WEIGHT = 0.6
 CLASSIFIER_WEIGHT = 0.4
 
+# Blending weights for last-10 games vs full-season ratings (stability improvement)
+RECENT_WEIGHT = 0.6
+SEASON_WEIGHT = 0.4
+
+# Blending weights for ML prediction vs rating-based prediction
+ML_WEIGHT = 0.7
+RATING_WEIGHT = 0.3
+
+# Minimum pace divisor to avoid division by zero in rating calculations
+MIN_PACE_DIVISOR = 80
+
+# Probability calibration: shrink raw probability toward neutral (0.5)
+PROB_RAW_WEIGHT = 0.7
+PROB_NEUTRAL_WEIGHT = 0.3
+NEUTRAL_PROBABILITY = 0.5
+
 
 def _verify_models_present() -> bool:
     return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
@@ -171,22 +187,10 @@ def run_prediction(target_date: str | None = None) -> None:
             except Exception:
                 logger.warning("betting_odds unavailable for game %s", game_id, exc_info=True)
 
-        # --- BOTH FAILED: skip prediction ---
-        if odds_source == "NONE":
-            logger.warning("Odds Source: NONE (game %s) – skipping prediction", game_id)
-            lines.extend(
-                [
-                    f"{zh_name(vis['full_name'])} vs {zh_name(home['full_name'])}",
-                    "盘口：暂无数据",
-                    "",
-                    "━━━━━━━━━━━━━━━━",
-                ]
-            )
-            continue
+        if odds_source != "NONE":
+            odds_valid_count += 1
 
-        odds_valid_count += 1
-
-        logger.info("Loaded odds for game %s", game_id)
+        logger.info("Loaded odds for game %s (source: %s)", game_id, odds_source)
         logger.info("  Opening Spread: %s", opening_spread)
         logger.info("  Live Spread: %s", live_spread)
         logger.info("  Opening Total: %s", opening_total)
@@ -198,11 +202,53 @@ def run_prediction(target_date: str | None = None) -> None:
         predicted_home_score = float(model_bundle.home_score_model.predict(feat)[0])
         predicted_away_score = float(model_bundle.away_score_model.predict(feat)[0])
 
+        # --- Model input upgrade: blend last-10 and season ratings ---
+        feat_row = feat.iloc[0]
+        season_home_off = float(feat_row.get("home_off_rating", 110.0))
+        season_away_off = float(feat_row.get("away_off_rating", 110.0))
+        season_home_pace = float(feat_row.get("home_pace", 98.0))
+        season_away_pace = float(feat_row.get("away_pace", 98.0))
+
+        home_avg10 = float(feat_row.get("home_avg_score_last10", predicted_home_score))
+        home_allowed10 = float(feat_row.get("home_avg_allowed_last10", predicted_away_score))
+        away_avg10 = float(feat_row.get("away_avg_score_last10", predicted_away_score))
+        away_allowed10 = float(feat_row.get("away_avg_allowed_last10", predicted_home_score))
+
+        last10_home_pace = (home_avg10 + home_allowed10) / 2.0
+        last10_away_pace = (away_avg10 + away_allowed10) / 2.0
+
+        last10_home_off = (home_avg10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
+        last10_away_off = (away_avg10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0
+
+        blended_home_off = RECENT_WEIGHT * last10_home_off + SEASON_WEIGHT * season_home_off
+        blended_away_off = RECENT_WEIGHT * last10_away_off + SEASON_WEIGHT * season_away_off
+
+        blended_home_pace = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
+        blended_away_pace = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
+
+        # Game pace correction
+        game_pace = (blended_home_pace + blended_away_pace) / 2.0
+
+        rating_home_score = blended_home_off * game_pace / 100.0
+        rating_away_score = blended_away_off * game_pace / 100.0
+
+        # Stabilize predicted scores by blending ML prediction with rating-based
+        predicted_home_score = ML_WEIGHT * predicted_home_score + RATING_WEIGHT * rating_home_score
+        predicted_away_score = ML_WEIGHT * predicted_away_score + RATING_WEIGHT * rating_away_score
+
         predicted_margin = predicted_home_score - predicted_away_score
         predicted_total = predicted_home_score + predicted_away_score
 
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
+
+        # --- Fallback lines when odds unavailable ---
+        if odds_source == "NONE":
+            opening_spread = 0.0
+            live_spread = 0.0
+            opening_total = predicted_total
+            live_total = predicted_total
+            logger.warning("Odds Source: NONE (game %s) – using predicted total as fallback line", game_id)
 
         # --- Hybrid: Spread Cover & Total model predictions ---
         spread_cover_prob_model = None
@@ -269,6 +315,10 @@ def run_prediction(target_date: str | None = None) -> None:
         else:
             combined_total_prob = mc_total_prob
 
+        # --- Probability calibration: shrink toward neutral ---
+        calibrated_total_prob = PROB_RAW_WEIGHT * combined_total_prob + PROB_NEUTRAL_WEIGHT * NEUTRAL_PROBABILITY
+        combined_total_prob = calibrated_total_prob
+
         if predicted_total > live_total:
             total_pick = "大分"
         else:
@@ -306,16 +356,13 @@ def run_prediction(target_date: str | None = None) -> None:
             - total_std * 0.2
         )
 
-        # --- Recommendation logic ---
-        if abs_edge >= 6 and over_probability >= 0.62:
-            recommendation = "推荐"
-            reason = "Edge大于6分且概率高于62%，模型信号强"
-        elif abs_edge >= 4 and over_probability >= 0.58:
-            recommendation = "观察"
-            reason = "Edge中等，概率一般，信号中等"
+        # --- Recommendation reason (based on abs_edge) ---
+        if abs_edge >= 8:
+            reason = "模型预测与盘口差距较大"
+        elif abs_edge >= 5:
+            reason = "模型预测存在明显价值"
         else:
-            recommendation = "不推荐"
-            reason = "Edge不足或概率不足，模型信号弱"
+            reason = "信号较弱但进入推荐范围"
 
         # --- Step 6: Save prediction to database ---
         spread_prob = combined_spread_prob
@@ -379,6 +426,7 @@ def run_prediction(target_date: str | None = None) -> None:
 
         # --- Collect game result for core pick selection ---
         total_range = f"{int(sim['total_5pct'])} – {int(sim['total_95pct'])}"
+        under_probability = 1.0 - over_probability
 
         game_results.append({
             "idx": len(game_results),
@@ -389,39 +437,59 @@ def run_prediction(target_date: str | None = None) -> None:
             "predicted_total": predicted_total,
             "total_edge_pts": total_edge_pts,
             "over_probability": over_probability,
+            "under_probability": under_probability,
             "total_range": total_range,
-            "recommendation": recommendation,
             "reason": reason,
             "signal_score": signal_score,
+            "odds_source": odds_source,
         })
 
-    # --- Core pick selection: pick the game with highest signal_score ---
-    core_pick_idx: int | None = None
+    # --- Daily recommendation: sort by signal_score, top 5 recommended ---
     if game_results:
-        core_pick_idx = max(range(len(game_results)), key=lambda i: game_results[i]["signal_score"])
+        sorted_results = sorted(game_results, key=lambda x: x["signal_score"], reverse=True)
+        if len(sorted_results) > 5:
+            for i, gr in enumerate(sorted_results):
+                gr["recommended"] = i < 5
+                gr["is_core"] = i == 0
+        else:
+            for i, gr in enumerate(sorted_results):
+                gr["recommended"] = True
+                gr["is_core"] = i == 0
+    else:
+        sorted_results = []
 
     # --- Build output for all games ---
-    for gr in game_results:
-        is_core = (gr["idx"] == core_pick_idx) if core_pick_idx is not None else False
+    for gr in sorted_results:
         edge_sign = "+" if gr["total_edge_pts"] >= 0 else ""
+        rec_text = "是" if gr["recommended"] else "否"
+        total_display = f"{gr['live_total']:.1f}" if gr["odds_source"] != "NONE" else "暂无数据"
         lines.extend([
             f"{zh_name(gr['vis']['full_name'])} vs {zh_name(gr['home']['full_name'])}",
             "",
-            f"盘口：{gr['live_total']:.1f}",
+            f"盘口",
+            total_display,
             "",
-            f"模型预测：{gr['predicted_total']:.1f}",
+            f"模型预测",
+            f"{gr['predicted_total']:.1f}",
             "",
-            f"Edge：{edge_sign}{gr['total_edge_pts']:.1f}",
+            f"Edge",
+            f"{edge_sign}{gr['total_edge_pts']:.1f}",
             "",
-            f"概率：{gr['over_probability']:.0%}",
+            f"概率",
+            f"大分 {gr['over_probability']:.0%}",
+            f"小分 {gr['under_probability']:.0%}",
             "",
-            f"模拟区间：{gr['total_range']}",
+            f"模拟区间",
+            gr["total_range"],
             "",
-            f"推荐：{gr['recommendation']}",
+            f"推荐",
+            rec_text,
             "",
-            f"原因：{gr['reason']}",
+            f"原因",
+            f"{gr['reason']}",
             "",
-            f"重心：{'是' if is_core else '否'}",
+            f"重心",
+            f"{'是' if gr['is_core'] else '否'}",
             "",
             "━━━━━━━━━━━━━━━━",
         ])

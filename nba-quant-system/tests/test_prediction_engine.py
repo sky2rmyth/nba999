@@ -2,56 +2,74 @@
 from __future__ import annotations
 
 
-class TestRecommendationLogic:
-    """Test the recommendation thresholds defined in the problem statement."""
+class TestRecommendationReason:
+    """Test the recommendation reason thresholds based on abs_edge."""
 
     @staticmethod
-    def _recommend(abs_edge: float, over_probability: float) -> tuple[str, str]:
-        """Mirror the recommendation logic from prediction_engine."""
-        if abs_edge >= 6 and over_probability >= 0.62:
-            return "推荐", "Edge大于6分且概率高于62%，模型信号强"
-        elif abs_edge >= 4 and over_probability >= 0.58:
-            return "观察", "Edge中等，概率一般，信号中等"
+    def _reason(abs_edge: float) -> str:
+        """Mirror the recommendation reason logic from prediction_engine."""
+        if abs_edge >= 8:
+            return "模型预测与盘口差距较大"
+        elif abs_edge >= 5:
+            return "模型预测存在明显价值"
         else:
-            return "不推荐", "Edge不足或概率不足，模型信号弱"
+            return "信号较弱但进入推荐范围"
 
-    def test_recommend_high_edge_high_prob(self):
-        rec, reason = self._recommend(8.0, 0.72)
-        assert rec == "推荐"
-        assert "Edge大于6分" in reason
+    def test_large_edge_reason(self):
+        reason = self._reason(10.0)
+        assert reason == "模型预测与盘口差距较大"
 
-    def test_recommend_boundary_6_and_62(self):
-        rec, _ = self._recommend(6.0, 0.62)
-        assert rec == "推荐"
+    def test_boundary_edge_8(self):
+        reason = self._reason(8.0)
+        assert reason == "模型预测与盘口差距较大"
 
-    def test_observe_medium_edge_medium_prob(self):
-        rec, reason = self._recommend(5.0, 0.60)
-        assert rec == "观察"
-        assert "Edge中等" in reason
+    def test_medium_edge_reason(self):
+        reason = self._reason(6.0)
+        assert reason == "模型预测存在明显价值"
 
-    def test_observe_boundary_4_and_58(self):
-        rec, _ = self._recommend(4.0, 0.58)
-        assert rec == "观察"
+    def test_boundary_edge_5(self):
+        reason = self._reason(5.0)
+        assert reason == "模型预测存在明显价值"
 
-    def test_not_recommended_low_edge(self):
-        rec, reason = self._recommend(2.0, 0.55)
-        assert rec == "不推荐"
-        assert "Edge不足" in reason
+    def test_small_edge_reason(self):
+        reason = self._reason(3.0)
+        assert reason == "信号较弱但进入推荐范围"
 
-    def test_not_recommended_high_edge_low_prob(self):
-        """High edge but low probability should not recommend."""
-        rec, _ = self._recommend(8.0, 0.50)
-        assert rec == "不推荐"
+    def test_zero_edge_reason(self):
+        reason = self._reason(0.0)
+        assert reason == "信号较弱但进入推荐范围"
 
-    def test_not_recommended_low_edge_high_prob(self):
-        """Low edge but high probability: not enough edge."""
-        rec, _ = self._recommend(3.0, 0.70)
-        assert rec == "不推荐"
 
-    def test_observe_not_recommend_boundary(self):
-        """abs_edge=4 but prob=0.57 should be 不推荐."""
-        rec, _ = self._recommend(4.0, 0.57)
-        assert rec == "不推荐"
+class TestProbabilityCalibration:
+    """Test probability calibration: calibrated = 0.7 * raw + 0.3 * 0.5."""
+
+    @staticmethod
+    def _calibrate(raw_prob: float) -> float:
+        return 0.7 * raw_prob + 0.3 * 0.5
+
+    def test_calibrate_high_prob(self):
+        calibrated = self._calibrate(0.80)
+        assert abs(calibrated - 0.71) < 0.001
+
+    def test_calibrate_low_prob(self):
+        calibrated = self._calibrate(0.30)
+        assert abs(calibrated - 0.36) < 0.001
+
+    def test_calibrate_neutral(self):
+        calibrated = self._calibrate(0.50)
+        assert abs(calibrated - 0.50) < 0.001
+
+    def test_calibrate_shrinks_toward_half(self):
+        """Calibration should shrink extreme probabilities toward 0.5."""
+        raw = 0.90
+        calibrated = self._calibrate(raw)
+        assert abs(calibrated - 0.5) < abs(raw - 0.5)
+
+    def test_under_probability(self):
+        """under_probability = 1 - calibrated over_probability."""
+        calibrated = self._calibrate(0.65)
+        under = 1.0 - calibrated
+        assert abs(calibrated + under - 1.0) < 0.001
 
 
 class TestSignalScore:
@@ -92,23 +110,61 @@ class TestCorePick:
             {"idx": 1, "signal_score": 30.0},
             {"idx": 2, "signal_score": 25.0},
         ]
-        core_idx = max(range(len(results)), key=lambda i: results[i]["signal_score"])
-        assert core_idx == 1
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        for i, gr in enumerate(sorted_results):
+            gr["recommended"] = True
+            gr["is_core"] = i == 0
+        assert sorted_results[0]["idx"] == 1
+        assert sorted_results[0]["is_core"] is True
         # Exactly one core
-        core_count = sum(1 for r in results if r["idx"] == core_idx)
+        core_count = sum(1 for r in sorted_results if r["is_core"])
         assert core_count == 1
 
     def test_single_game_is_core(self):
         results = [{"idx": 0, "signal_score": 15.0}]
-        core_idx = max(range(len(results)), key=lambda i: results[i]["signal_score"])
-        assert core_idx == 0
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        for i, gr in enumerate(sorted_results):
+            gr["recommended"] = True
+            gr["is_core"] = i == 0
+        assert sorted_results[0]["is_core"] is True
 
     def test_empty_results_no_core(self):
         results = []
-        core_idx = None
-        if results:
-            core_idx = max(range(len(results)), key=lambda i: results[i]["signal_score"])
-        assert core_idx is None
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        assert len(sorted_results) == 0
+
+    def test_top5_recommendation_more_than_5(self):
+        """When more than 5 games, only top 5 by signal_score are recommended."""
+        results = [{"idx": i, "signal_score": float(i)} for i in range(8)]
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        for i, gr in enumerate(sorted_results):
+            gr["recommended"] = i < 5
+            gr["is_core"] = i == 0
+        recommended = [r for r in sorted_results if r["recommended"]]
+        assert len(recommended) == 5
+        assert sorted_results[0]["is_core"] is True
+        assert sorted_results[0]["signal_score"] == 7.0
+
+    def test_all_recommended_when_5_or_fewer(self):
+        """When 5 or fewer games, all are recommended."""
+        results = [{"idx": i, "signal_score": float(i)} for i in range(4)]
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        for i, gr in enumerate(sorted_results):
+            gr["recommended"] = True
+            gr["is_core"] = i == 0
+        recommended = [r for r in sorted_results if r["recommended"]]
+        assert len(recommended) == 4
+        assert sorted_results[0]["is_core"] is True
+
+    def test_exactly_5_games_all_recommended(self):
+        """When exactly 5 games, all are recommended."""
+        results = [{"idx": i, "signal_score": float(i * 2)} for i in range(5)]
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        for i, gr in enumerate(sorted_results):
+            gr["recommended"] = True
+            gr["is_core"] = i == 0
+        recommended = [r for r in sorted_results if r["recommended"]]
+        assert len(recommended) == 5
 
 
 class TestEdgeCalculation:

@@ -33,6 +33,22 @@ MIN_SIMULATION_COUNT = 10000
 MC_WEIGHT = 0.6
 CLASSIFIER_WEIGHT = 0.4
 
+# Blending weights for last-10 games vs full-season ratings (stability improvement)
+RECENT_WEIGHT = 0.6
+SEASON_WEIGHT = 0.4
+
+# Blending weights for ML prediction vs rating-based prediction
+ML_WEIGHT = 0.7
+RATING_WEIGHT = 0.3
+
+# Minimum pace divisor to avoid division by zero in rating calculations
+MIN_PACE_DIVISOR = 80
+
+# Probability calibration: shrink raw probability toward neutral (0.5)
+PROB_RAW_WEIGHT = 0.7
+PROB_NEUTRAL_WEIGHT = 0.3
+NEUTRAL_PROBABILITY = 0.5
+
 
 def _verify_models_present() -> bool:
     return all((MODEL_DIR / f).exists() for f in MODEL_FILES)
@@ -201,14 +217,14 @@ def run_prediction(target_date: str | None = None) -> None:
         last10_home_pace = (home_avg10 + home_allowed10) / 2.0
         last10_away_pace = (away_avg10 + away_allowed10) / 2.0
 
-        last10_home_off = (home_avg10 / max(last10_home_pace, 80)) * 100.0
-        last10_away_off = (away_avg10 / max(last10_away_pace, 80)) * 100.0
+        last10_home_off = (home_avg10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
+        last10_away_off = (away_avg10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0
 
-        blended_home_off = 0.6 * last10_home_off + 0.4 * season_home_off
-        blended_away_off = 0.6 * last10_away_off + 0.4 * season_away_off
+        blended_home_off = RECENT_WEIGHT * last10_home_off + SEASON_WEIGHT * season_home_off
+        blended_away_off = RECENT_WEIGHT * last10_away_off + SEASON_WEIGHT * season_away_off
 
-        blended_home_pace = 0.6 * last10_home_pace + 0.4 * season_home_pace
-        blended_away_pace = 0.6 * last10_away_pace + 0.4 * season_away_pace
+        blended_home_pace = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
+        blended_away_pace = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
 
         # Game pace correction
         game_pace = (blended_home_pace + blended_away_pace) / 2.0
@@ -217,8 +233,8 @@ def run_prediction(target_date: str | None = None) -> None:
         rating_away_score = blended_away_off * game_pace / 100.0
 
         # Stabilize predicted scores by blending ML prediction with rating-based
-        predicted_home_score = 0.7 * predicted_home_score + 0.3 * rating_home_score
-        predicted_away_score = 0.7 * predicted_away_score + 0.3 * rating_away_score
+        predicted_home_score = ML_WEIGHT * predicted_home_score + RATING_WEIGHT * rating_home_score
+        predicted_away_score = ML_WEIGHT * predicted_away_score + RATING_WEIGHT * rating_away_score
 
         predicted_margin = predicted_home_score - predicted_away_score
         predicted_total = predicted_home_score + predicted_away_score
@@ -299,8 +315,8 @@ def run_prediction(target_date: str | None = None) -> None:
         else:
             combined_total_prob = mc_total_prob
 
-        # --- Probability calibration ---
-        calibrated_total_prob = 0.7 * combined_total_prob + 0.3 * 0.5
+        # --- Probability calibration: shrink toward neutral ---
+        calibrated_total_prob = PROB_RAW_WEIGHT * combined_total_prob + PROB_NEUTRAL_WEIGHT * NEUTRAL_PROBABILITY
         combined_total_prob = calibrated_total_prob
 
         if predicted_total > live_total:

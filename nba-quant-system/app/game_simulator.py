@@ -2,6 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 
+# Noise reduction factor to reduce extreme tail distribution in Monte Carlo simulation
+NOISE_REDUCTION_FACTOR = 0.75
+# Maximum allowed total standard deviation to limit simulation variance
+MAX_TOTAL_STD = 13
+# Z-score for 90% confidence interval (5th–95th percentile)
+Z_SCORE_90PCT = 1.65
+
 
 def run_possession_simulation(
     game_id: int,
@@ -19,9 +26,9 @@ def run_possession_simulation(
     home_std = max(np.sqrt(home_variance), 8.0)
     away_std = max(np.sqrt(away_variance), 8.0)
 
-    # Scale noise by 0.75 to reduce extreme tail distribution
-    home_scores = rng.normal(predicted_home_score, home_std * 0.75, n_sim)
-    away_scores = rng.normal(predicted_away_score, away_std * 0.75, n_sim)
+    # Scale noise by NOISE_REDUCTION_FACTOR to reduce extreme tail distribution
+    home_scores = rng.normal(predicted_home_score, home_std * NOISE_REDUCTION_FACTOR, n_sim)
+    away_scores = rng.normal(predicted_away_score, away_std * NOISE_REDUCTION_FACTOR, n_sim)
 
     # Clip to reasonable NBA score ranges (historical min ~60, max ~160)
     home_scores = np.clip(home_scores, 70, 170)
@@ -39,8 +46,8 @@ def run_possession_simulation(
     total_std = float(np.std(totals))
 
     # Cap total_std to limit simulation variance
-    if total_std > 13:
-        total_std = 13
+    if total_std > MAX_TOTAL_STD:
+        total_std = MAX_TOTAL_STD
 
     variance = float(np.var(totals) + np.var(margins))
 
@@ -49,8 +56,8 @@ def run_possession_simulation(
     spread_5pct = float(np.percentile(margins, 5))
     spread_95pct = float(np.percentile(margins, 95))
     # Use parametric interval based on capped total_std
-    total_5pct = total_mean - 1.65 * total_std
-    total_95pct = total_mean + 1.65 * total_std
+    total_5pct = total_mean - Z_SCORE_90PCT * total_std
+    total_95pct = total_mean + Z_SCORE_90PCT * total_std
 
     return {
         "spread_cover_probability": spread_cover_prob,

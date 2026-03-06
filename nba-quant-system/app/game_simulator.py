@@ -14,6 +14,11 @@ Z_SCORE_90PCT = 1.65
 MIN_RECOMMEND_EDGE = 6
 
 
+# Simulation noise parameters
+PACE_STD = 2        # Standard deviation for pace variation across simulations
+PPP_STD = 0.06      # Standard deviation for points-per-possession variation
+
+
 def run_possession_simulation(
     game_id: int,
     game_pace: float,
@@ -27,9 +32,9 @@ def run_possession_simulation(
     seed = int(game_id) % 1_000_000
     rng = np.random.default_rng(seed)
 
-    pace_sims = rng.normal(game_pace, 2, n_sim)
-    home_ppp_sims = rng.normal(home_adj_ppp, 0.06, n_sim)
-    away_ppp_sims = rng.normal(away_adj_ppp, 0.06, n_sim)
+    pace_sims = rng.normal(game_pace, PACE_STD, n_sim)
+    home_ppp_sims = rng.normal(home_adj_ppp, PPP_STD, n_sim)
+    away_ppp_sims = rng.normal(away_adj_ppp, PPP_STD, n_sim)
 
     home_scores = pace_sims * home_ppp_sims
     away_scores = pace_sims * away_ppp_sims

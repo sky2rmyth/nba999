@@ -249,7 +249,35 @@ class TestSignalScore:
 
 
 class TestCorePick:
-    """Test that core pick is the highest signal_score among recommended games (abs_edge >= 6)."""
+    """Test that core pick is the game with largest abs(edge), sorted by abs(edge)."""
+
+    @staticmethod
+    def _apply_recommendation(results, min_recs=5):
+        """Mirror the recommendation logic from prediction_engine."""
+        sorted_results = sorted(results, key=lambda x: abs(x["total_edge_pts"]), reverse=True)
+        for gr in sorted_results:
+            abs_edge_val = abs(gr["total_edge_pts"])
+            if abs_edge_val >= 6:
+                gr["recommended"] = True
+            elif abs_edge_val < 3:
+                gr["recommended"] = False
+            else:
+                gr["recommended"] = False
+            gr["is_core"] = False
+
+        recommended_count = sum(1 for gr in sorted_results if gr["recommended"])
+        if recommended_count < min_recs:
+            for gr in sorted_results:
+                if recommended_count >= min_recs:
+                    break
+                if not gr["recommended"]:
+                    gr["recommended"] = True
+                    recommended_count += 1
+
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended:
+            recommended[0]["is_core"] = True
+        return sorted_results
 
     def test_single_core_pick(self):
         results = [
@@ -257,65 +285,40 @@ class TestCorePick:
             {"idx": 1, "signal_score": 30.0, "total_edge_pts": 8.0},
             {"idx": 2, "signal_score": 25.0, "total_edge_pts": 3.0},
         ]
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for gr in sorted_results:
-            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
-            gr["is_core"] = False
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        if recommended:
-            recommended[0]["is_core"] = True
-        # idx=1 has highest signal_score among recommended (edge >= 6)
+        sorted_results = self._apply_recommendation(results)
+        # idx=1 has largest abs(edge)=8, should be core
         assert sorted_results[0]["idx"] == 1
         assert sorted_results[0]["is_core"] is True
-        # idx=2 (edge=3) should not be recommended
-        not_rec = [r for r in sorted_results if not r["recommended"]]
-        assert len(not_rec) == 1
-        assert not_rec[0]["idx"] == 2
 
     def test_single_game_with_large_edge_is_core(self):
         results = [{"idx": 0, "signal_score": 15.0, "total_edge_pts": 7.0}]
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for gr in sorted_results:
-            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
-            gr["is_core"] = False
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        if recommended:
-            recommended[0]["is_core"] = True
+        sorted_results = self._apply_recommendation(results, min_recs=1)
         assert sorted_results[0]["is_core"] is True
 
     def test_no_core_when_all_edges_small(self):
-        """When no game has abs_edge >= 6, no core pick is selected."""
+        """When no game has abs_edge >= 6 and fewer than min_recs, all get recommended."""
         results = [
             {"idx": 0, "signal_score": 20.0, "total_edge_pts": 3.0},
             {"idx": 1, "signal_score": 25.0, "total_edge_pts": 4.0},
         ]
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for gr in sorted_results:
-            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
-            gr["is_core"] = False
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        if recommended:
-            recommended[0]["is_core"] = True
+        sorted_results = self._apply_recommendation(results, min_recs=5)
+        # Both get recommended due to min_recs fill; core = max abs_edge
         core_count = sum(1 for r in sorted_results if r["is_core"])
-        assert core_count == 0
+        assert core_count == 1
+        assert sorted_results[0]["is_core"] is True  # idx=1 has abs_edge=4 (largest)
 
     def test_empty_results_no_core(self):
         results = []
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        sorted_results = self._apply_recommendation(results)
         assert len(sorted_results) == 0
 
     def test_recommendation_based_on_abs_edge_6(self):
-        """Games are recommended when abs_edge >= 6, regardless of count."""
+        """Games with abs_edge >= 6 are always recommended."""
         results = [{"idx": i, "signal_score": float(i), "total_edge_pts": float(i)} for i in range(8)]
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for gr in sorted_results:
-            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
-            gr["is_core"] = False
+        sorted_results = self._apply_recommendation(results)
         recommended = [gr for gr in sorted_results if gr["recommended"]]
-        if recommended:
-            recommended[0]["is_core"] = True
-        # Only idx=6 and idx=7 have edge >= 6
-        assert len(recommended) == 2
+        # idx=6 and idx=7 have edge >= 6, plus min 5 fills in idx=5, idx=4, idx=3
+        assert len(recommended) >= 5
         assert recommended[0]["is_core"] is True
 
     def test_negative_edge_also_recommends(self):
@@ -324,16 +327,41 @@ class TestCorePick:
             {"idx": 0, "signal_score": 30.0, "total_edge_pts": -7.0},
             {"idx": 1, "signal_score": 20.0, "total_edge_pts": 3.0},
         ]
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for gr in sorted_results:
-            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
-            gr["is_core"] = False
+        sorted_results = self._apply_recommendation(results)
         recommended = [gr for gr in sorted_results if gr["recommended"]]
-        if recommended:
-            recommended[0]["is_core"] = True
-        assert len(recommended) == 1
-        assert recommended[0]["idx"] == 0
-        assert recommended[0]["is_core"] is True
+        assert any(r["idx"] == 0 for r in recommended)
+        core = [r for r in sorted_results if r["is_core"]]
+        assert len(core) == 1
+        assert core[0]["idx"] == 0  # abs_edge=7 is largest
+
+    def test_min_5_recommendations_fills_from_top_abs_edge(self):
+        """When fewer than 5 games have abs_edge >= 6, fill up to 5 from top abs_edge."""
+        results = [
+            {"idx": 0, "total_edge_pts": 10.0, "signal_score": 30.0},
+            {"idx": 1, "total_edge_pts": 4.0, "signal_score": 20.0},
+            {"idx": 2, "total_edge_pts": 3.5, "signal_score": 18.0},
+            {"idx": 3, "total_edge_pts": 2.0, "signal_score": 15.0},
+            {"idx": 4, "total_edge_pts": 1.0, "signal_score": 10.0},
+            {"idx": 5, "total_edge_pts": 0.5, "signal_score": 5.0},
+        ]
+        sorted_results = self._apply_recommendation(results)
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        # idx=0 has edge >= 6 (auto-recommended), then fill 4 more from top abs_edge
+        assert len(recommended) == 5
+        rec_ids = {r["idx"] for r in recommended}
+        assert rec_ids == {0, 1, 2, 3, 4}
+
+    def test_core_pick_is_max_abs_edge(self):
+        """Core pick should be the game with the largest abs(edge)."""
+        results = [
+            {"idx": 0, "total_edge_pts": -12.0, "signal_score": 25.0},
+            {"idx": 1, "total_edge_pts": 8.0, "signal_score": 30.0},
+            {"idx": 2, "total_edge_pts": 6.0, "signal_score": 20.0},
+        ]
+        sorted_results = self._apply_recommendation(results, min_recs=1)
+        core = [r for r in sorted_results if r["is_core"]]
+        assert len(core) == 1
+        assert core[0]["idx"] == 0  # abs(-12) = 12 is largest
 
 
 class TestEdgeCalculation:
@@ -370,3 +398,76 @@ class TestIntervalFormat:
         total_95pct = 240.1
         total_range = f"{int(total_5pct)} – {int(total_95pct)}"
         assert total_range == "199 – 240"
+
+
+class TestLeagueConstants:
+    """Test league-average constants match the refactored values."""
+
+    def test_league_avg_pace(self):
+        from app.game_simulator import LEAGUE_AVG_PACE
+        assert LEAGUE_AVG_PACE == 99
+
+    def test_league_avg_off(self):
+        from app.game_simulator import LEAGUE_AVG_OFF
+        assert LEAGUE_AVG_OFF == 114
+
+    def test_league_avg_def(self):
+        from app.game_simulator import LEAGUE_AVG_DEF
+        assert LEAGUE_AVG_DEF == 114
+
+    def test_ppp_std(self):
+        from app.game_simulator import PPP_STD
+        assert PPP_STD == 0.05
+
+
+class TestGamePaceCalculation:
+    """Test game pace is simple average clamped to [94, 104]."""
+
+    @staticmethod
+    def _calc_pace(home_pace, away_pace):
+        pace = (home_pace + away_pace) / 2.0
+        return max(94.0, min(104.0, pace))
+
+    def test_normal_pace(self):
+        assert self._calc_pace(100.0, 98.0) == 99.0
+
+    def test_clamp_high(self):
+        assert self._calc_pace(110.0, 108.0) == 104.0
+
+    def test_clamp_low(self):
+        assert self._calc_pace(88.0, 90.0) == 94.0
+
+    def test_boundary_104(self):
+        assert self._calc_pace(104.0, 104.0) == 104.0
+
+    def test_boundary_94(self):
+        assert self._calc_pace(94.0, 94.0) == 94.0
+
+
+class TestOffensiveStructureFactors:
+    """Test PPP adjustment with 3P/FT/ORB structure factors."""
+
+    @staticmethod
+    def _structure_adj(three_factor, ft_factor, orb_factor):
+        return 1.0 + three_factor * 0.15 + ft_factor * 0.12 + orb_factor * 0.10
+
+    def test_default_structure_adj(self):
+        """With league-average defaults (0.36, 0.25, 0.25), structure adj > 1."""
+        adj = self._structure_adj(0.36, 0.25, 0.25)
+        expected = 1.0 + 0.36 * 0.15 + 0.25 * 0.12 + 0.25 * 0.10
+        assert abs(adj - expected) < 0.0001
+        assert adj > 1.0
+
+    def test_zero_factors(self):
+        adj = self._structure_adj(0.0, 0.0, 0.0)
+        assert adj == 1.0
+
+    def test_ppp_final_includes_structure(self):
+        """PPP final = PPP_adj * structure_adj."""
+        home_ppp_adj = 1.10
+        three_factor = 0.36
+        ft_factor = 0.25
+        orb_factor = 0.25
+        structure = self._structure_adj(three_factor, ft_factor, orb_factor)
+        home_ppp_final = home_ppp_adj * structure
+        assert home_ppp_final > home_ppp_adj

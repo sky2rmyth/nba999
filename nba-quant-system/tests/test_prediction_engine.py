@@ -295,9 +295,9 @@ class TestCorePick:
             recommended_games = sorted(
                 recommended_games, key=lambda x: abs(x["total_edge_pts"]), reverse=True
             )[:max_recs]
-            keep_ids = {id(g) for g in recommended_games}
+            keep_indices = {g["idx"] for g in recommended_games}
             for gr in sorted_results:
-                if gr["recommended"] and id(gr) not in keep_ids:
+                if gr["recommended"] and gr["idx"] not in keep_indices:
                     gr["recommended"] = False
 
         # Guaranteed core pick: prefer star_pick with largest abs(edge)

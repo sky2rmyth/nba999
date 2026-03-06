@@ -596,22 +596,17 @@ def run_prediction(target_date: str | None = None) -> None:
                 if rec_count > MAX_DAILY_RECOMMENDATIONS:
                     gr["recommended"] = False
 
-        # Core pick = star_pick game with largest abs(edge)
+        # Core pick = star_pick game with largest abs(edge), max 1
         star_results = [gr for gr in sorted_results if gr["recommended"] and gr["star_pick"]]
         if star_results:
             star_results[0]["is_core"] = True
-        else:
-            # Fallback: first recommended game (largest abs(edge))
-            recommended_results = [gr for gr in sorted_results if gr["recommended"]]
-            if recommended_results:
-                recommended_results[0]["is_core"] = True
     else:
         sorted_results = []
 
     # --- Build table output for all games ---
     predictions = []
     for gr in sorted_results:
-        direction = "over" if gr["total_edge_pts"] >= 0 else "under"
+        direction = "over" if gr["total_edge_pts"] > 0 else "under"
         prob = gr["over_probability"] if direction == "over" else gr["under_probability"]
         predictions.append({
             "away": zh_name(gr["vis"]["full_name"]),

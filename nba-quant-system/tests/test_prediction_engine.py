@@ -276,14 +276,10 @@ class TestCorePick:
                 if rec_count > max_recs:
                     gr["recommended"] = False
 
-        # Core pick = star_pick game with largest abs(edge)
+        # Core pick = star_pick game with largest abs(edge), max 1
         star_results = [gr for gr in sorted_results if gr["recommended"] and gr["star_pick"]]
         if star_results:
             star_results[0]["is_core"] = True
-        else:
-            recommended = [gr for gr in sorted_results if gr["recommended"]]
-            if recommended:
-                recommended[0]["is_core"] = True
         return sorted_results
 
     def test_single_core_pick(self):
@@ -300,11 +296,12 @@ class TestCorePick:
         assert sorted_results[0]["idx"] == 1
         assert sorted_results[0]["is_core"] is True
 
-    def test_single_game_with_large_edge_and_high_prob_is_core(self):
+    def test_single_game_with_edge_below_8_not_core(self):
+        """Edge=7 and prob=0.65 → recommended but NOT core (needs edge >= 8)."""
         results = [{"idx": 0, "signal_score": 15.0, "total_edge_pts": 7.0,
                      "over_probability": 0.65, "under_probability": 0.35}]
         sorted_results = self._apply_recommendation(results)
-        assert sorted_results[0]["is_core"] is True
+        assert sorted_results[0]["is_core"] is False
         assert sorted_results[0]["recommended"] is True
 
     def test_no_recommendation_when_edges_and_prob_small(self):
@@ -351,9 +348,10 @@ class TestCorePick:
         sorted_results = self._apply_recommendation(results)
         recommended = [gr for gr in sorted_results if gr["recommended"]]
         assert any(r["idx"] == 0 for r in recommended)
+        assert not any(r["idx"] == 1 for r in recommended)
+        # Edge=-7 → abs(7) < 8, no core pick
         core = [r for r in sorted_results if r["is_core"]]
-        assert len(core) == 1
-        assert core[0]["idx"] == 0
+        assert len(core) == 0
 
     def test_max_5_recommendations_caps_from_top_abs_edge(self):
         """When more than 5 games qualify, only top 5 by abs(edge) are kept."""
@@ -399,8 +397,8 @@ class TestCorePick:
         assert len(star_picks) == 1
         assert star_picks[0]["idx"] == 2
 
-    def test_fallback_core_when_no_star_pick(self):
-        """When no star pick exists, core = first recommended (largest abs_edge)."""
+    def test_no_core_when_no_star_pick(self):
+        """When no game meets star_pick criteria, no core pick is assigned."""
         results = [
             {"idx": 0, "total_edge_pts": 6.0, "signal_score": 20.0,
              "over_probability": 0.62, "under_probability": 0.38},
@@ -409,8 +407,37 @@ class TestCorePick:
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
+        assert len(core) == 0
+
+    def test_no_fill_to_minimum(self):
+        """Unlike old logic, there is no fill-to-minimum. 0 recommendations is valid."""
+        results = [
+            {"idx": 0, "total_edge_pts": 3.0, "over_probability": 0.55, "under_probability": 0.45},
+            {"idx": 1, "total_edge_pts": 2.0, "over_probability": 0.52, "under_probability": 0.48},
+        ]
+        sorted_results = self._apply_recommendation(results)
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        assert len(recommended) == 0
+
+    def test_no_core_when_prob_below_065(self):
+        """Edge >= 8 but prob < 0.65 → recommended but no core pick."""
+        results = [
+            {"idx": 0, "total_edge_pts": 10.0, "over_probability": 0.62, "under_probability": 0.38},
+        ]
+        sorted_results = self._apply_recommendation(results)
+        assert sorted_results[0]["recommended"] is True
+        assert sorted_results[0]["is_core"] is False
+
+    def test_only_one_core_pick(self):
+        """Even when multiple games meet core criteria, only 1 is marked."""
+        results = [
+            {"idx": 0, "total_edge_pts": 10.0, "over_probability": 0.70, "under_probability": 0.30},
+            {"idx": 1, "total_edge_pts": 9.0, "over_probability": 0.68, "under_probability": 0.32},
+        ]
+        sorted_results = self._apply_recommendation(results)
+        core = [r for r in sorted_results if r["is_core"]]
         assert len(core) == 1
-        assert core[0]["idx"] == 0
+        assert core[0]["idx"] == 0  # abs(10) > abs(9)
 
 
 class TestEdgeCalculation:

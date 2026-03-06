@@ -8,6 +8,12 @@ import numpy as np
 import pandas as pd
 
 from .database import DB_PATH
+from .data_pipeline import (
+    calculate_possessions,
+    calculate_pace,
+    offensive_rating,
+    defensive_rating,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +122,24 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     avg_score = np.mean(scores)
     avg_allowed = np.mean(allowed)
     avg_total = np.mean(totals_vals) if totals_vals else 210.0
-    pace = avg_total / 2.0  # approximate possessions
 
-    feat[f"{prefix}_off_rating"] = (avg_score / max(pace, 80)) * 100.0
-    feat[f"{prefix}_def_rating"] = (avg_allowed / max(pace, 80)) * 100.0
+    # Estimate possessions from scores using league-average efficiency (~1.14 PPP).
+    # This avoids the old ``avg_total / 2`` shortcut which inflates pace to ~110
+    # and collapses offensive ratings to ~100.
+    est_possessions = avg_total / 2.14  # ≈ 98-100 for a typical 210-214 total
+    est_possessions = max(est_possessions, 1)
+    pace = est_possessions
+
+    feat[f"{prefix}_off_rating"] = offensive_rating(avg_score, est_possessions)
+    feat[f"{prefix}_def_rating"] = defensive_rating(avg_allowed, est_possessions)
     feat[f"{prefix}_net_rating"] = feat[f"{prefix}_off_rating"] - feat[f"{prefix}_def_rating"]
     feat[f"{prefix}_pace"] = pace
+
+    if pace > 110:
+        logger.warning("PACE OUTLIER DETECTED: %s pace=%.1f", prefix, pace)
+    off_rtg = feat[f"{prefix}_off_rating"]
+    if off_rtg < 105 or off_rtg > 125:
+        logger.warning("OFF RATING OUT OF RANGE: %s off_rating=%.1f", prefix, off_rtg)
 
     # Last 5 games
     last5 = games[:5] if len(games) >= 5 else games
@@ -169,9 +187,10 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
         opp_scores = [g["scored"] for g in opp_games]
         opp_allowed = [g["allowed"] for g in opp_games]
         opp_total = np.mean([g["total"] for g in opp_games])
-        opp_pace = opp_total / 2.0
-        feat[f"opp_{prefix}_def_eff"] = (np.mean(opp_allowed) / max(opp_pace, 80)) * 100.0
-        feat[f"opp_{prefix}_off_eff"] = (np.mean(opp_scores) / max(opp_pace, 80)) * 100.0
+        opp_possessions = opp_total / 2.14
+        opp_possessions = max(opp_possessions, 1)
+        feat[f"opp_{prefix}_def_eff"] = defensive_rating(np.mean(opp_allowed), opp_possessions)
+        feat[f"opp_{prefix}_off_eff"] = offensive_rating(np.mean(opp_scores), opp_possessions)
     else:
         feat[f"opp_{prefix}_def_eff"] = 0.0
         feat[f"opp_{prefix}_off_eff"] = 0.0

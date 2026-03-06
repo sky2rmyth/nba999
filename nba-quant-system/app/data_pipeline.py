@@ -9,6 +9,52 @@ from .database import init_db, upsert_game
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Advanced metrics: possession-based calculations
+# ---------------------------------------------------------------------------
+
+def calculate_possessions(team_stats: dict) -> float:
+    """Calculate possessions from box score stats.
+
+    Formula: FGA + 0.44 * FTA - Offensive Rebounds + Turnovers
+    """
+    fga = team_stats.get("fga", 0)
+    fta = team_stats.get("fta", 0)
+    orb = team_stats.get("offensive_rebounds", 0)
+    tov = team_stats.get("turnovers", 0)
+
+    possessions = fga + 0.44 * fta - orb + tov
+
+    return max(possessions, 1)
+
+
+def calculate_pace(team_stats: dict) -> float:
+    """Calculate pace (possessions per 48 minutes)."""
+    possessions = calculate_possessions(team_stats)
+
+    minutes = 48
+
+    pace = possessions / minutes * 48
+
+    return pace
+
+
+def offensive_rating(points: float, possessions: float) -> float:
+    """Calculate offensive rating (points per 100 possessions)."""
+    if possessions == 0:
+        return 0
+
+    return (points / possessions) * 100
+
+
+def defensive_rating(opp_points: float, possessions: float) -> float:
+    """Calculate defensive rating (opponent points per 100 possessions)."""
+    if possessions == 0:
+        return 0
+
+    return (opp_points / possessions) * 100
+
+
 def _try_send_telegram(text: str) -> None:
     """Send Telegram message, silently ignore failures."""
     try:

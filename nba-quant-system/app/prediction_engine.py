@@ -556,8 +556,6 @@ def run_prediction(target_date: str | None = None) -> None:
             abs_edge_val = abs(gr["total_edge_pts"])
             if abs_edge_val >= 6:
                 gr["recommended"] = True
-            elif abs_edge_val < 3:
-                gr["recommended"] = False
             else:
                 gr["recommended"] = False
             gr["is_core"] = False

@@ -337,12 +337,12 @@ class TestCorePick:
     def test_min_5_recommendations_fills_from_top_abs_edge(self):
         """When fewer than 5 games have abs_edge >= 6, fill up to 5 from top abs_edge."""
         results = [
-            {"idx": 0, "total_edge_pts": 10.0},
-            {"idx": 1, "total_edge_pts": 4.0},
-            {"idx": 2, "total_edge_pts": 3.5},
-            {"idx": 3, "total_edge_pts": 2.0},
-            {"idx": 4, "total_edge_pts": 1.0},
-            {"idx": 5, "total_edge_pts": 0.5},
+            {"idx": 0, "total_edge_pts": 10.0, "signal_score": 30.0},
+            {"idx": 1, "total_edge_pts": 4.0, "signal_score": 20.0},
+            {"idx": 2, "total_edge_pts": 3.5, "signal_score": 18.0},
+            {"idx": 3, "total_edge_pts": 2.0, "signal_score": 15.0},
+            {"idx": 4, "total_edge_pts": 1.0, "signal_score": 10.0},
+            {"idx": 5, "total_edge_pts": 0.5, "signal_score": 5.0},
         ]
         sorted_results = self._apply_recommendation(results)
         recommended = [gr for gr in sorted_results if gr["recommended"]]
@@ -354,9 +354,9 @@ class TestCorePick:
     def test_core_pick_is_max_abs_edge(self):
         """Core pick should be the game with the largest abs(edge)."""
         results = [
-            {"idx": 0, "total_edge_pts": -12.0},
-            {"idx": 1, "total_edge_pts": 8.0},
-            {"idx": 2, "total_edge_pts": 6.0},
+            {"idx": 0, "total_edge_pts": -12.0, "signal_score": 25.0},
+            {"idx": 1, "total_edge_pts": 8.0, "signal_score": 30.0},
+            {"idx": 2, "total_edge_pts": 6.0, "signal_score": 20.0},
         ]
         sorted_results = self._apply_recommendation(results, min_recs=1)
         core = [r for r in sorted_results if r["is_core"]]

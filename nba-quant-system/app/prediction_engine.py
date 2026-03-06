@@ -360,13 +360,10 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
 
-        # --- Fallback lines when odds unavailable ---
+        # --- Skip games without valid odds ---
         if odds_source == "NONE":
-            opening_spread = 0.0
-            live_spread = 0.0
-            opening_total = predicted_total
-            live_total = predicted_total
-            logger.warning("Odds Source: NONE (game %s) – using predicted total as fallback line", game_id)
+            logger.warning("Odds Source: NONE (game %s) – skipping game (no line available)", game_id)
+            continue
 
         print("Closing Total Line:", live_total)
 
@@ -569,12 +566,24 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
     # --- Daily recommendation ---
-    # Rules: abs(edge) >= 5 AND prob >= 0.60 → recommended.
+    # Quality filter: abs(edge) >= 5 AND prob >= 0.60 → recommended.
     # Star pick: abs(edge) >= 8 AND prob >= 0.65.
-    # Cap at 5 recommendations (top 5 by abs(edge)).
+    # Min recommendations based on game count; auto-fill if needed.
+    # Guaranteed 1 core (star) pick per day.
+    # Cap at 5 recommendations.
     MAX_DAILY_RECOMMENDATIONS = 5
     if game_results:
         sorted_results = sorted(game_results, key=lambda x: abs(x["total_edge_pts"]), reverse=True)
+
+        # Determine minimum recommendations based on game count
+        total_games = len(sorted_results)
+        if total_games > 5:
+            min_recommend = 4
+        elif total_games >= 3:
+            min_recommend = 3
+        else:
+            min_recommend = 1
+
         for gr in sorted_results:
             abs_edge_val = abs(gr["total_edge_pts"])
             prob = max(gr["over_probability"], gr["under_probability"])
@@ -588,18 +597,43 @@ def run_prediction(target_date: str | None = None) -> None:
                 gr["star_pick"] = False
             gr["is_core"] = False
 
+        # Collect quality-filtered recommendations
+        recommended_games = [gr for gr in sorted_results if gr["recommended"]]
+
+        # Auto-fill if recommendations below minimum
+        if len(recommended_games) < min_recommend:
+            for gr in sorted_results:
+                if not gr["recommended"]:
+                    gr["recommended"] = True
+                    recommended_games.append(gr)
+                if len(recommended_games) >= min_recommend:
+                    break
+
         # Cap recommendations at MAX_DAILY_RECOMMENDATIONS by abs(edge)
-        rec_count = 0
-        for gr in sorted_results:
-            if gr["recommended"]:
-                rec_count += 1
-                if rec_count > MAX_DAILY_RECOMMENDATIONS:
+        if len(recommended_games) > MAX_DAILY_RECOMMENDATIONS:
+            recommended_games = sorted(
+                recommended_games, key=lambda x: abs(x["total_edge_pts"]), reverse=True
+            )[:MAX_DAILY_RECOMMENDATIONS]
+            # Mark excess as not recommended
+            keep_indices = {g["idx"] for g in recommended_games}
+            for gr in sorted_results:
+                if gr["recommended"] and gr["idx"] not in keep_indices:
                     gr["recommended"] = False
 
-        # Core pick = star_pick game with largest abs(edge), max 1
+        # Guaranteed core pick: prefer star_pick with largest abs(edge)
         star_results = [gr for gr in sorted_results if gr["recommended"] and gr["star_pick"]]
         if star_results:
             star_results[0]["is_core"] = True
+        else:
+            # No star_pick qualifies — promote the recommended game with largest abs(edge)
+            rec_sorted = sorted(
+                [gr for gr in sorted_results if gr["recommended"]],
+                key=lambda x: abs(x["total_edge_pts"]),
+                reverse=True,
+            )
+            if rec_sorted:
+                rec_sorted[0]["star_pick"] = True
+                rec_sorted[0]["is_core"] = True
     else:
         sorted_results = []
 

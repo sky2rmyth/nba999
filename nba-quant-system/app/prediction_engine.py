@@ -293,8 +293,8 @@ def run_prediction(target_date: str | None = None) -> None:
         away_avg10 = float(feat_row.get("away_avg_score_last10", predicted_away_score))
         away_allowed10 = float(feat_row.get("away_avg_allowed_last10", predicted_home_score))
 
-        last10_home_pace = (home_avg10 + home_allowed10) / 2.0
-        last10_away_pace = (away_avg10 + away_allowed10) / 2.0
+        last10_home_pace = (home_avg10 + home_allowed10) / 2.14
+        last10_away_pace = (away_avg10 + away_allowed10) / 2.14
 
         last10_home_off = (home_avg10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
         last10_away_off = (away_avg10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0

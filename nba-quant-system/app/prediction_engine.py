@@ -314,6 +314,11 @@ def run_prediction(target_date: str | None = None) -> None:
         game_pace = (home_pace_blend + away_pace_blend) / 2.0
         game_pace = max(94.0, min(104.0, game_pace))
 
+        if game_pace > 120:
+            print("WARNING: Pace too high:", game_pace)
+        if game_pace < 80:
+            print("WARNING: Pace too low:", game_pace)
+
         # Possession model: PPP with defensive adjustment
         home_ppp = home_off / 100.0
         away_ppp = away_off / 100.0
@@ -337,8 +342,37 @@ def run_prediction(target_date: str | None = None) -> None:
         home_adj = home_ppp_adj * structure_adj
         away_adj = away_ppp_adj * structure_adj
 
+        if home_adj > 1.5:
+            print("WARNING: Home PPP abnormal:", home_adj)
+        if away_adj > 1.5:
+            print("WARNING: Away PPP abnormal:", away_adj)
+
+        print("====== MODEL DEBUG ======")
+        print("Home Team:", home["full_name"])
+        print("Away Team:", vis["full_name"])
+        print("Home Pace:", home_pace_blend)
+        print("Away Pace:", away_pace_blend)
+        print("Game Pace:", game_pace)
+        print("Home Off Rating:", home_off)
+        print("Away Off Rating:", away_off)
+        print("Home Def Rating:", home_def)
+        print("Away Def Rating:", away_def)
+        print("Home PPP Base:", home_ppp)
+        print("Away PPP Base:", away_ppp)
+        print("Home PPP Adj:", home_ppp_adj)
+        print("Away PPP Adj:", away_ppp_adj)
+        print("Home PPP Final:", home_adj)
+        print("Away PPP Final:", away_adj)
+        print("=========================")
+
         # Base predicted total from possession model
         predicted_total = game_pace * (home_adj + away_adj)
+
+        print("Predicted Total:", predicted_total)
+        if predicted_total > 260:
+            print("WARNING: Predicted total extremely high")
+        if predicted_total < 180:
+            print("WARNING: Predicted total extremely low")
 
         # Keep ML-based margin for spread analysis
         predicted_margin = predicted_home_score - predicted_away_score
@@ -353,6 +387,8 @@ def run_prediction(target_date: str | None = None) -> None:
             opening_total = predicted_total
             live_total = predicted_total
             logger.warning("Odds Source: NONE (game %s) – using predicted total as fallback line", game_id)
+
+        print("Closing Total Line:", live_total)
 
         # --- Hybrid: Spread Cover & Total model predictions ---
         spread_cover_prob_model = None
@@ -381,6 +417,13 @@ def run_prediction(target_date: str | None = None) -> None:
             spread_line=live_spread,
             n_sim=MIN_SIMULATION_COUNT,
         )
+
+        print("Simulation Low:", sim["simulation_low"])
+        print("Simulation High:", sim["simulation_high"])
+        print("Simulation Std:", sim["total_std"])
+        print("Over Probability:", sim["over_probability"])
+        print("Under Probability:", sim["under_probability"])
+        print("=========================")
 
         progress.set_game_progress(
             f"⚙️ Game {idx + 1}/{len(games)}: {zh_name(vis['full_name'])} vs {zh_name(home['full_name'])} ✅"

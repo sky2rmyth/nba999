@@ -457,7 +457,7 @@ class TestPPPNoStructureAmplification:
         assert away_ppp == 1.08
 
     def test_ppp_within_normal_range(self):
-        """Realistic off_rating values produce PPP in [1.05, 1.15]."""
+        """Realistic off_rating values produce PPP in [1.0, 1.2]."""
         for off_rating in [105.0, 110.0, 114.0, 115.0]:
             ppp = off_rating / 100.0
             assert 1.0 <= ppp <= 1.2, f"PPP {ppp} out of range for off_rating {off_rating}"

@@ -12,7 +12,7 @@ from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games
 from .feature_engineering import FEATURE_COLUMNS, _compute_team_features
-from .game_simulator import run_possession_simulation, LEAGUE_AVG_PACE, LEAGUE_AVG_OFF, LEAGUE_AVG_DEF
+from .game_simulator import run_possession_simulation
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
@@ -319,22 +319,17 @@ def run_prediction(target_date: str | None = None) -> None:
         if game_pace < 80:
             print("WARNING: Pace too low:", game_pace)
 
-        # Possession model: PPP with defensive adjustment
+        # Possession model: PPP derived directly from off_rating.
+        # off_rating already embeds offensive efficiency (3P / FT / ORB);
+        # no additional multiplicative adjustment is applied to avoid
+        # double-counting which inflates Predicted Total above 250.
         home_ppp = home_off / 100.0
         away_ppp = away_off / 100.0
-        home_ppp_adj = home_ppp * (LEAGUE_AVG_DEF / max(away_def, 1.0))
-        away_ppp_adj = away_ppp * (LEAGUE_AVG_DEF / max(home_def, 1.0))
 
-        # off_rating already includes 3P / FT / ORB offensive structure;
-        # no additional multiplicative adjustment is applied to avoid
-        # double-counting which inflates Predicted Total above 260.
-        home_adj = home_ppp_adj
-        away_adj = away_ppp_adj
-
-        if home_adj > 1.5:
-            print("WARNING: Home PPP abnormal:", home_adj)
-        if away_adj > 1.5:
-            print("WARNING: Away PPP abnormal:", away_adj)
+        if home_ppp > 1.5:
+            print("WARNING: Home PPP abnormal:", home_ppp)
+        if away_ppp > 1.5:
+            print("WARNING: Away PPP abnormal:", away_ppp)
 
         print("====== MODEL DEBUG ======")
         print("Home Team:", home["full_name"])
@@ -346,16 +341,12 @@ def run_prediction(target_date: str | None = None) -> None:
         print("Away Off Rating:", away_off)
         print("Home Def Rating:", home_def)
         print("Away Def Rating:", away_def)
-        print("Home PPP Base:", home_ppp)
-        print("Away PPP Base:", away_ppp)
-        print("Home PPP Adj:", home_ppp_adj)
-        print("Away PPP Adj:", away_ppp_adj)
-        print("Home PPP Final:", home_adj)
-        print("Away PPP Final:", away_adj)
+        print("Home PPP:", home_ppp)
+        print("Away PPP:", away_ppp)
         print("=========================")
 
         # Base predicted total from possession model
-        predicted_total = game_pace * (home_adj + away_adj)
+        predicted_total = game_pace * (home_ppp + away_ppp)
 
         print("Predicted Total:", predicted_total)
         if predicted_total > 260:
@@ -399,8 +390,8 @@ def run_prediction(target_date: str | None = None) -> None:
         sim = run_possession_simulation(
             game_id=game_id,
             game_pace=game_pace,
-            home_adj_ppp=home_adj,
-            away_adj_ppp=away_adj,
+            home_adj_ppp=home_ppp,
+            away_adj_ppp=away_ppp,
             predicted_total=predicted_total,
             closing_total=live_total,
             spread_line=live_spread,

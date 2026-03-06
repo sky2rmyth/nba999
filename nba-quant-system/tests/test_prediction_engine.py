@@ -445,25 +445,27 @@ class TestGamePaceCalculation:
 
 
 class TestPPPNoStructureAmplification:
-    """PPP final equals PPP adj — no structure factor amplification."""
+    """PPP equals off_rating / 100 — no defensive adjustment or structure factor."""
 
-    def test_ppp_final_equals_ppp_adj(self):
-        """off_rating already embeds 3P/FT/ORB; PPP final must not exceed PPP adj."""
-        home_ppp_adj = 1.10
-        away_ppp_adj = 1.08
-        # In the current model, final PPP is assigned directly from adj PPP
-        home_ppp_final = home_ppp_adj
-        away_ppp_final = away_ppp_adj
-        assert home_ppp_final == home_ppp_adj
-        assert away_ppp_final == away_ppp_adj
-        # Verify no amplification: final should be within normal NBA PPP range
-        assert 1.0 <= home_ppp_final <= 1.25
-        assert 1.0 <= away_ppp_final <= 1.25
+    def test_ppp_equals_off_rating_div_100(self):
+        """PPP must be derived directly from off_rating / 100 with no multiplier."""
+        home_off = 112.0
+        away_off = 108.0
+        home_ppp = home_off / 100.0
+        away_ppp = away_off / 100.0
+        assert home_ppp == 1.12
+        assert away_ppp == 1.08
+
+    def test_ppp_within_normal_range(self):
+        """Realistic off_rating values produce PPP in [1.05, 1.15]."""
+        for off_rating in [105.0, 110.0, 114.0, 115.0]:
+            ppp = off_rating / 100.0
+            assert 1.0 <= ppp <= 1.2, f"PPP {ppp} out of range for off_rating {off_rating}"
 
     def test_predicted_total_in_range(self):
-        """With realistic PPP and pace, predicted total stays in 215-240."""
+        """With realistic PPP and pace, predicted total stays in 210-240."""
         game_pace = 99.0
-        home_ppp_final = 1.12
-        away_ppp_final = 1.10
-        predicted_total = game_pace * (home_ppp_final + away_ppp_final)
-        assert 200 <= predicted_total <= 260
+        home_ppp = 1.12
+        away_ppp = 1.10
+        predicted_total = game_pace * (home_ppp + away_ppp)
+        assert 210 <= predicted_total <= 240

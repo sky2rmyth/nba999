@@ -325,22 +325,11 @@ def run_prediction(target_date: str | None = None) -> None:
         home_ppp_adj = home_ppp * (LEAGUE_AVG_DEF / max(away_def, 1.0))
         away_ppp_adj = away_ppp * (LEAGUE_AVG_DEF / max(home_def, 1.0))
 
-        # Offensive structure factors (3P / FT / ORB)
-        # Use league-average defaults when team-level data is unavailable
-        home_3p_rate = float(feat_row.get("home_3p_rate", 0.36))
-        away_3p_rate = float(feat_row.get("away_3p_rate", 0.36))
-        home_ft_rate = float(feat_row.get("home_ft_rate", 0.25))
-        away_ft_rate = float(feat_row.get("away_ft_rate", 0.25))
-        home_orb_rate = float(feat_row.get("home_orb_rate", 0.25))
-        away_orb_rate = float(feat_row.get("away_orb_rate", 0.25))
-
-        three_factor = (home_3p_rate + away_3p_rate) / 2.0
-        ft_factor = (home_ft_rate + away_ft_rate) / 2.0
-        orb_factor = (home_orb_rate + away_orb_rate) / 2.0
-
-        structure_adj = 1.0 + three_factor * 0.15 + ft_factor * 0.12 + orb_factor * 0.10
-        home_adj = home_ppp_adj * structure_adj
-        away_adj = away_ppp_adj * structure_adj
+        # off_rating already includes 3P / FT / ORB offensive structure;
+        # no additional multiplicative adjustment is applied to avoid
+        # double-counting which inflates Predicted Total above 260.
+        home_adj = home_ppp_adj
+        away_adj = away_ppp_adj
 
         if home_adj > 1.5:
             print("WARNING: Home PPP abnormal:", home_adj)

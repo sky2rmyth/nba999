@@ -569,42 +569,44 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
     # --- Daily recommendation ---
-    # Rules: abs_edge < 3 → never recommend; abs_edge >= 6 → always recommend.
-    # Ensure at least 5 games recommended (top 5 by abs_edge).
-    # Core pick = game with largest abs(edge).
-    MIN_DAILY_RECOMMENDATIONS = 5
+    # Rules: abs(edge) >= 5 AND prob >= 0.60 → recommended.
+    # Star pick: abs(edge) >= 8 AND prob >= 0.65.
+    # Cap at 5 recommendations (top 5 by abs(edge)).
+    MAX_DAILY_RECOMMENDATIONS = 5
     if game_results:
         sorted_results = sorted(game_results, key=lambda x: abs(x["total_edge_pts"]), reverse=True)
         for gr in sorted_results:
             abs_edge_val = abs(gr["total_edge_pts"])
-            if abs_edge_val >= 6:
+            prob = max(gr["over_probability"], gr["under_probability"])
+            if abs_edge_val >= 5 and prob >= 0.60:
                 gr["recommended"] = True
             else:
                 gr["recommended"] = False
+            if abs_edge_val >= 8 and prob >= 0.65:
+                gr["star_pick"] = True
+            else:
+                gr["star_pick"] = False
             gr["is_core"] = False
 
-        # Ensure at least MIN_DAILY_RECOMMENDATIONS games are recommended
-        recommended_count = sum(1 for gr in sorted_results if gr["recommended"])
-        if recommended_count < MIN_DAILY_RECOMMENDATIONS:
-            for gr in sorted_results:
-                if recommended_count >= MIN_DAILY_RECOMMENDATIONS:
-                    break
-                if not gr["recommended"]:
-                    gr["recommended"] = True
-                    recommended_count += 1
+        # Cap recommendations at MAX_DAILY_RECOMMENDATIONS by abs(edge)
+        rec_count = 0
+        for gr in sorted_results:
+            if gr["recommended"]:
+                rec_count += 1
+                if rec_count > MAX_DAILY_RECOMMENDATIONS:
+                    gr["recommended"] = False
 
-        # Core pick = game with largest abs(edge)
-        recommended_results = [gr for gr in sorted_results if gr["recommended"]]
-        if recommended_results:
-            # Already sorted by abs(edge) descending, first recommended is core
-            recommended_results[0]["is_core"] = True
+        # Core pick = star_pick game with largest abs(edge), max 1
+        star_results = [gr for gr in sorted_results if gr["recommended"] and gr["star_pick"]]
+        if star_results:
+            star_results[0]["is_core"] = True
     else:
         sorted_results = []
 
     # --- Build table output for all games ---
     predictions = []
     for gr in sorted_results:
-        direction = "over" if gr["total_edge_pts"] >= 0 else "under"
+        direction = "over" if gr["total_edge_pts"] > 0 else "under"
         prob = gr["over_probability"] if direction == "over" else gr["under_probability"]
         predictions.append({
             "away": zh_name(gr["vis"]["full_name"]),

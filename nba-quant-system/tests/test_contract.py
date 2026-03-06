@@ -122,101 +122,84 @@ class TestKellyStake:
 # ---------- Monte Carlo simulation (Requirement 3) ----------
 
 class TestMonteCarlo:
-    def test_simulation_returns_home_win_probability(self):
-        from app.game_simulator import run_possession_simulation
-        result = run_possession_simulation(
+    def _make_sim(self, **overrides):
+        """Create a simulation result with sensible defaults."""
+        defaults = dict(
             game_id=12345,
-            predicted_home_score=110.0,
-            predicted_away_score=105.0,
-            home_variance=64.0,
-            away_variance=64.0,
+            game_pace=99.0,
+            home_adj_ppp=1.10,
+            away_adj_ppp=1.05,
+            predicted_total=213.0,
+            closing_total=215.0,
             spread_line=-3.5,
-            total_line=215.0,
         )
+        defaults.update(overrides)
+        from app.game_simulator import run_possession_simulation
+        return run_possession_simulation(**defaults)
+
+    def test_simulation_returns_home_win_probability(self):
+        result = self._make_sim()
         assert "home_win_probability" in result
         assert 0.0 <= result["home_win_probability"] <= 1.0
 
     def test_simulation_minimum_10000_runs(self):
-        from app.game_simulator import run_possession_simulation
-        result = run_possession_simulation(
-            game_id=99999,
-            predicted_home_score=108.0,
-            predicted_away_score=106.0,
-            home_variance=64.0,
-            away_variance=64.0,
-            spread_line=-2.0,
-            total_line=214.0,
-        )
+        result = self._make_sim(game_id=99999)
         assert result["simulation_count"] >= 10000
 
     def test_simulation_has_required_fields(self):
-        from app.game_simulator import run_possession_simulation
-        result = run_possession_simulation(
-            game_id=11111,
-            predicted_home_score=112.0,
-            predicted_away_score=108.0,
-            home_variance=64.0,
-            away_variance=64.0,
-            spread_line=-4.0,
-            total_line=220.0,
-        )
+        result = self._make_sim(game_id=11111)
         required_fields = [
             "spread_cover_probability", "over_probability",
             "home_win_probability", "expected_home_score",
             "expected_visitor_score", "predicted_margin",
             "predicted_total", "simulation_count",
+            "under_probability", "edge", "recommend",
+            "simulation_low", "simulation_high",
         ]
         for field in required_fields:
             assert field in result, f"Missing field: {field}"
 
-    def test_total_std_capped_at_13(self):
-        """total_std should be capped at 13 to reduce extreme simulation variance."""
-        from app.game_simulator import run_possession_simulation
-        result = run_possession_simulation(
-            game_id=22222,
-            predicted_home_score=115.0,
-            predicted_away_score=110.0,
-            home_variance=400.0,
-            away_variance=400.0,
-            spread_line=-3.0,
-            total_line=225.0,
-        )
-        assert result["total_std"] <= 13
+    def test_total_std_capped_at_11(self):
+        """total_std should be capped at 11 to reduce extreme simulation variance."""
+        result = self._make_sim(game_id=22222, game_pace=105.0,
+                                home_adj_ppp=1.20, away_adj_ppp=1.15)
+        assert result["total_std"] <= 11
 
     def test_parametric_interval_uses_capped_std(self):
-        """Interval should use mean ± 1.65 * capped total_std."""
-        from app.game_simulator import run_possession_simulation
-        result = run_possession_simulation(
-            game_id=33333,
-            predicted_home_score=112.0,
-            predicted_away_score=108.0,
-            home_variance=64.0,
-            away_variance=64.0,
-            spread_line=-4.0,
-            total_line=220.0,
-        )
-        total_mean = result["predicted_total"]
+        """Interval should use predicted_total ± 1.65 * capped total_std."""
+        result = self._make_sim(game_id=33333)
+        predicted_total = result["predicted_total"]
         total_std = result["total_std"]
-        expected_5pct = total_mean - 1.65 * total_std
-        expected_95pct = total_mean + 1.65 * total_std
+        expected_5pct = predicted_total - 1.65 * total_std
+        expected_95pct = predicted_total + 1.65 * total_std
         assert abs(result["total_5pct"] - expected_5pct) < 0.01
         assert abs(result["total_95pct"] - expected_95pct) < 0.01
 
-    def test_noise_reduction_narrower_distribution(self):
-        """With 0.75 noise scaling, total_std should be smaller than input std."""
-        from app.game_simulator import run_possession_simulation
-        result = run_possession_simulation(
-            game_id=44444,
-            predicted_home_score=110.0,
-            predicted_away_score=105.0,
-            home_variance=100.0,
-            away_variance=100.0,
-            spread_line=-3.0,
-            total_line=215.0,
-        )
-        # sqrt(100) = 10, with 0.75 scaling effective std = 7.5
-        # combined total_std should be narrower than raw std
-        assert result["total_std"] < 15.0
+    def test_over_under_probabilities_sum_to_one(self):
+        """over_probability + under_probability should equal 1."""
+        result = self._make_sim(game_id=44444)
+        assert abs(result["over_probability"] + result["under_probability"] - 1.0) < 0.001
+
+    def test_edge_calculation(self):
+        """edge should equal predicted_total - closing_total."""
+        result = self._make_sim(game_id=55555, predicted_total=225.0, closing_total=220.0)
+        assert abs(result["edge"] - 5.0) < 0.01
+
+    def test_recommend_true_when_edge_ge_6(self):
+        """recommend should be True when abs_edge >= 6."""
+        result = self._make_sim(predicted_total=226.0, closing_total=220.0)
+        assert result["recommend"] is True
+
+    def test_recommend_false_when_edge_lt_6(self):
+        """recommend should be False when abs_edge < 6."""
+        result = self._make_sim(predicted_total=222.0, closing_total=220.0)
+        assert result["recommend"] is False
+
+    def test_simulation_low_high_match_5pct_95pct(self):
+        """simulation_low/high should match total_5pct/total_95pct."""
+        result = self._make_sim(game_id=66666)
+        assert result["simulation_low"] == result["total_5pct"]
+        assert result["simulation_high"] == result["total_95pct"]
 
 
 # ---------- Chinese language (Requirement 2) ----------

@@ -157,10 +157,10 @@ class TestRecommendationReason:
         """Mirror the recommendation reason logic from prediction_engine."""
         if abs_edge >= 8:
             return "模型预测与盘口差距较大"
-        elif abs_edge >= 5:
+        elif abs_edge >= 6:
             return "模型预测存在明显价值"
         else:
-            return "信号较弱但进入推荐范围"
+            return "信号较弱，不推荐"
 
     def test_large_edge_reason(self):
         reason = self._reason(10.0)
@@ -174,17 +174,17 @@ class TestRecommendationReason:
         reason = self._reason(6.0)
         assert reason == "模型预测存在明显价值"
 
-    def test_boundary_edge_5(self):
-        reason = self._reason(5.0)
+    def test_boundary_edge_6(self):
+        reason = self._reason(6.0)
         assert reason == "模型预测存在明显价值"
 
     def test_small_edge_reason(self):
         reason = self._reason(3.0)
-        assert reason == "信号较弱但进入推荐范围"
+        assert reason == "信号较弱，不推荐"
 
     def test_zero_edge_reason(self):
         reason = self._reason(0.0)
-        assert reason == "信号较弱但进入推荐范围"
+        assert reason == "信号较弱，不推荐"
 
 
 class TestProbabilityCalibration:
@@ -249,69 +249,91 @@ class TestSignalScore:
 
 
 class TestCorePick:
-    """Test that exactly one core pick is selected (the highest signal score)."""
+    """Test that core pick is the highest signal_score among recommended games (abs_edge >= 6)."""
 
     def test_single_core_pick(self):
         results = [
-            {"idx": 0, "signal_score": 20.0},
-            {"idx": 1, "signal_score": 30.0},
-            {"idx": 2, "signal_score": 25.0},
+            {"idx": 0, "signal_score": 20.0, "total_edge_pts": 7.0},
+            {"idx": 1, "signal_score": 30.0, "total_edge_pts": 8.0},
+            {"idx": 2, "signal_score": 25.0, "total_edge_pts": 3.0},
         ]
         sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for i, gr in enumerate(sorted_results):
-            gr["recommended"] = True
-            gr["is_core"] = i == 0
+        for gr in sorted_results:
+            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+            gr["is_core"] = False
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended:
+            recommended[0]["is_core"] = True
+        # idx=1 has highest signal_score among recommended (edge >= 6)
         assert sorted_results[0]["idx"] == 1
         assert sorted_results[0]["is_core"] is True
-        # Exactly one core
-        core_count = sum(1 for r in sorted_results if r["is_core"])
-        assert core_count == 1
+        # idx=2 (edge=3) should not be recommended
+        not_rec = [r for r in sorted_results if not r["recommended"]]
+        assert len(not_rec) == 1
+        assert not_rec[0]["idx"] == 2
 
-    def test_single_game_is_core(self):
-        results = [{"idx": 0, "signal_score": 15.0}]
+    def test_single_game_with_large_edge_is_core(self):
+        results = [{"idx": 0, "signal_score": 15.0, "total_edge_pts": 7.0}]
         sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for i, gr in enumerate(sorted_results):
-            gr["recommended"] = True
-            gr["is_core"] = i == 0
+        for gr in sorted_results:
+            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+            gr["is_core"] = False
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended:
+            recommended[0]["is_core"] = True
         assert sorted_results[0]["is_core"] is True
+
+    def test_no_core_when_all_edges_small(self):
+        """When no game has abs_edge >= 6, no core pick is selected."""
+        results = [
+            {"idx": 0, "signal_score": 20.0, "total_edge_pts": 3.0},
+            {"idx": 1, "signal_score": 25.0, "total_edge_pts": 4.0},
+        ]
+        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
+        for gr in sorted_results:
+            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+            gr["is_core"] = False
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended:
+            recommended[0]["is_core"] = True
+        core_count = sum(1 for r in sorted_results if r["is_core"])
+        assert core_count == 0
 
     def test_empty_results_no_core(self):
         results = []
         sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
         assert len(sorted_results) == 0
 
-    def test_top5_recommendation_more_than_5(self):
-        """When more than 5 games, only top 5 by signal_score are recommended."""
-        results = [{"idx": i, "signal_score": float(i)} for i in range(8)]
+    def test_recommendation_based_on_abs_edge_6(self):
+        """Games are recommended when abs_edge >= 6, regardless of count."""
+        results = [{"idx": i, "signal_score": float(i), "total_edge_pts": float(i)} for i in range(8)]
         sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for i, gr in enumerate(sorted_results):
-            gr["recommended"] = i < 5
-            gr["is_core"] = i == 0
-        recommended = [r for r in sorted_results if r["recommended"]]
-        assert len(recommended) == 5
-        assert sorted_results[0]["is_core"] is True
-        assert sorted_results[0]["signal_score"] == 7.0
+        for gr in sorted_results:
+            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+            gr["is_core"] = False
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended:
+            recommended[0]["is_core"] = True
+        # Only idx=6 and idx=7 have edge >= 6
+        assert len(recommended) == 2
+        assert recommended[0]["is_core"] is True
 
-    def test_all_recommended_when_5_or_fewer(self):
-        """When 5 or fewer games, all are recommended."""
-        results = [{"idx": i, "signal_score": float(i)} for i in range(4)]
+    def test_negative_edge_also_recommends(self):
+        """Negative edge with abs >= 6 should also be recommended."""
+        results = [
+            {"idx": 0, "signal_score": 30.0, "total_edge_pts": -7.0},
+            {"idx": 1, "signal_score": 20.0, "total_edge_pts": 3.0},
+        ]
         sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for i, gr in enumerate(sorted_results):
-            gr["recommended"] = True
-            gr["is_core"] = i == 0
-        recommended = [r for r in sorted_results if r["recommended"]]
-        assert len(recommended) == 4
-        assert sorted_results[0]["is_core"] is True
-
-    def test_exactly_5_games_all_recommended(self):
-        """When exactly 5 games, all are recommended."""
-        results = [{"idx": i, "signal_score": float(i * 2)} for i in range(5)]
-        sorted_results = sorted(results, key=lambda x: x["signal_score"], reverse=True)
-        for i, gr in enumerate(sorted_results):
-            gr["recommended"] = True
-            gr["is_core"] = i == 0
-        recommended = [r for r in sorted_results if r["recommended"]]
-        assert len(recommended) == 5
+        for gr in sorted_results:
+            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+            gr["is_core"] = False
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended:
+            recommended[0]["is_core"] = True
+        assert len(recommended) == 1
+        assert recommended[0]["idx"] == 0
+        assert recommended[0]["is_core"] is True
 
 
 class TestEdgeCalculation:

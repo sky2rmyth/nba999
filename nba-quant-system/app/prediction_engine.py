@@ -12,7 +12,7 @@ from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games
 from .feature_engineering import FEATURE_COLUMNS, _compute_team_features
-from .game_simulator import run_possession_simulation
+from .game_simulator import run_possession_simulation, LEAGUE_AVG_PACE, LEAGUE_AVG_DEF
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
@@ -283,6 +283,8 @@ def run_prediction(target_date: str | None = None) -> None:
         feat_row = feat.iloc[0]
         season_home_off = float(feat_row.get("home_off_rating", 110.0))
         season_away_off = float(feat_row.get("away_off_rating", 110.0))
+        season_home_def = float(feat_row.get("home_def_rating", 110.0))
+        season_away_def = float(feat_row.get("away_def_rating", 110.0))
         season_home_pace = float(feat_row.get("home_pace", 98.0))
         season_away_pace = float(feat_row.get("away_pace", 98.0))
 
@@ -296,25 +298,33 @@ def run_prediction(target_date: str | None = None) -> None:
 
         last10_home_off = (home_avg10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
         last10_away_off = (away_avg10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0
+        last10_home_def = (home_allowed10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
+        last10_away_def = (away_allowed10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0
 
-        blended_home_off = RECENT_WEIGHT * last10_home_off + SEASON_WEIGHT * season_home_off
-        blended_away_off = RECENT_WEIGHT * last10_away_off + SEASON_WEIGHT * season_away_off
+        # Blended ratings: 0.6 last-10 + 0.4 season
+        home_off = RECENT_WEIGHT * last10_home_off + SEASON_WEIGHT * season_home_off
+        away_off = RECENT_WEIGHT * last10_away_off + SEASON_WEIGHT * season_away_off
+        home_def = RECENT_WEIGHT * last10_home_def + SEASON_WEIGHT * season_home_def
+        away_def = RECENT_WEIGHT * last10_away_def + SEASON_WEIGHT * season_away_def
 
-        blended_home_pace = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
-        blended_away_pace = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
+        home_pace_blend = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
+        away_pace_blend = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
 
-        # Game pace correction
-        game_pace = (blended_home_pace + blended_away_pace) / 2.0
+        # Game pace: multiplicative model clamped to [92, 105]
+        game_pace = LEAGUE_AVG_PACE * (home_pace_blend / LEAGUE_AVG_PACE) * (away_pace_blend / LEAGUE_AVG_PACE)
+        game_pace = max(92.0, min(105.0, game_pace))
 
-        rating_home_score = blended_home_off * game_pace / 100.0
-        rating_away_score = blended_away_off * game_pace / 100.0
+        # Possession model: PPP with defensive adjustment
+        home_ppp = home_off / 100.0
+        away_ppp = away_off / 100.0
+        home_adj = home_ppp * (LEAGUE_AVG_DEF / max(away_def, 1.0))
+        away_adj = away_ppp * (LEAGUE_AVG_DEF / max(home_def, 1.0))
 
-        # Stabilize predicted scores by blending ML prediction with rating-based
-        predicted_home_score = ML_WEIGHT * predicted_home_score + RATING_WEIGHT * rating_home_score
-        predicted_away_score = ML_WEIGHT * predicted_away_score + RATING_WEIGHT * rating_away_score
+        # Base predicted total from possession model
+        predicted_total = game_pace * (home_adj + away_adj)
 
+        # Keep ML-based margin for spread analysis
         predicted_margin = predicted_home_score - predicted_away_score
-        predicted_total = predicted_home_score + predicted_away_score
 
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
         logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
@@ -343,20 +353,15 @@ def run_prediction(target_date: str | None = None) -> None:
             except Exception:
                 pass
 
-        # --- Compute variance from recent games ---
-        home_feat_row = feat.iloc[0]
-        home_var = max(float(home_feat_row.get("home_scoring_variance", 64.0)), 64.0)
-        away_var = max(float(home_feat_row.get("away_scoring_variance", 64.0)), 64.0)
-
         # --- Step 4: Monte Carlo simulation ---
         sim = run_possession_simulation(
             game_id=game_id,
-            predicted_home_score=predicted_home_score,
-            predicted_away_score=predicted_away_score,
-            home_variance=home_var,
-            away_variance=away_var,
+            game_pace=game_pace,
+            home_adj_ppp=home_adj,
+            away_adj_ppp=away_adj,
+            predicted_total=predicted_total,
+            closing_total=live_total,
             spread_line=live_spread,
-            total_line=live_total,
             n_sim=MIN_SIMULATION_COUNT,
         )
 
@@ -436,10 +441,10 @@ def run_prediction(target_date: str | None = None) -> None:
         # --- Recommendation reason (based on abs_edge) ---
         if abs_edge >= 8:
             reason = "模型预测与盘口差距较大"
-        elif abs_edge >= 5:
+        elif abs_edge >= 6:
             reason = "模型预测存在明显价值"
         else:
-            reason = "信号较弱但进入推荐范围"
+            reason = "信号较弱，不推荐"
 
         # --- Step 6: Save prediction to database ---
         spread_prob = combined_spread_prob
@@ -523,17 +528,16 @@ def run_prediction(target_date: str | None = None) -> None:
             "odds_source": odds_source,
         })
 
-    # --- Daily recommendation: sort by signal_score, top 5 recommended ---
+    # --- Daily recommendation: recommend if abs_edge >= 6 ---
     if game_results:
         sorted_results = sorted(game_results, key=lambda x: x["signal_score"], reverse=True)
-        if len(sorted_results) > 5:
-            for i, gr in enumerate(sorted_results):
-                gr["recommended"] = i < 5
-                gr["is_core"] = i == 0
-        else:
-            for i, gr in enumerate(sorted_results):
-                gr["recommended"] = True
-                gr["is_core"] = i == 0
+        for i, gr in enumerate(sorted_results):
+            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+            gr["is_core"] = False
+        # Core pick = highest signal_score among recommended games
+        recommended_results = [gr for gr in sorted_results if gr["recommended"]]
+        if recommended_results:
+            recommended_results[0]["is_core"] = True
     else:
         sorted_results = []
 

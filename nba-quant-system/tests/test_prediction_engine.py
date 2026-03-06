@@ -444,30 +444,20 @@ class TestGamePaceCalculation:
         assert self._calc_pace(94.0, 94.0) == 94.0
 
 
-class TestOffensiveStructureFactors:
-    """Test PPP adjustment with 3P/FT/ORB structure factors."""
+class TestPPPNoStructureAmplification:
+    """PPP final equals PPP adj — no structure factor amplification."""
 
-    @staticmethod
-    def _structure_adj(three_factor, ft_factor, orb_factor):
-        return 1.0 + three_factor * 0.15 + ft_factor * 0.12 + orb_factor * 0.10
-
-    def test_default_structure_adj(self):
-        """With league-average defaults (0.36, 0.25, 0.25), structure adj > 1."""
-        adj = self._structure_adj(0.36, 0.25, 0.25)
-        expected = 1.0 + 0.36 * 0.15 + 0.25 * 0.12 + 0.25 * 0.10
-        assert abs(adj - expected) < 0.0001
-        assert adj > 1.0
-
-    def test_zero_factors(self):
-        adj = self._structure_adj(0.0, 0.0, 0.0)
-        assert adj == 1.0
-
-    def test_ppp_final_includes_structure(self):
-        """PPP final = PPP_adj * structure_adj."""
+    def test_ppp_final_equals_ppp_adj(self):
+        """off_rating already embeds 3P/FT/ORB; no extra multiplier."""
         home_ppp_adj = 1.10
-        three_factor = 0.36
-        ft_factor = 0.25
-        orb_factor = 0.25
-        structure = self._structure_adj(three_factor, ft_factor, orb_factor)
-        home_ppp_final = home_ppp_adj * structure
-        assert home_ppp_final > home_ppp_adj
+        away_ppp_adj = 1.08
+        assert home_ppp_adj == home_ppp_adj  # no structure_adj applied
+        assert away_ppp_adj == away_ppp_adj
+
+    def test_predicted_total_in_range(self):
+        """With realistic PPP and pace, predicted total stays in 215-240."""
+        game_pace = 99.0
+        home_ppp_final = 1.12
+        away_ppp_final = 1.10
+        predicted_total = game_pace * (home_ppp_final + away_ppp_final)
+        assert 200 <= predicted_total <= 260

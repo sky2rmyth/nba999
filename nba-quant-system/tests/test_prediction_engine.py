@@ -412,8 +412,10 @@ class TestCorePick:
     def test_no_fill_to_minimum(self):
         """Unlike old logic, there is no fill-to-minimum. 0 recommendations is valid."""
         results = [
-            {"idx": 0, "total_edge_pts": 3.0, "over_probability": 0.55, "under_probability": 0.45},
-            {"idx": 1, "total_edge_pts": 2.0, "over_probability": 0.52, "under_probability": 0.48},
+            {"idx": 0, "total_edge_pts": 3.0, "signal_score": 15.0,
+             "over_probability": 0.55, "under_probability": 0.45},
+            {"idx": 1, "total_edge_pts": 2.0, "signal_score": 10.0,
+             "over_probability": 0.52, "under_probability": 0.48},
         ]
         sorted_results = self._apply_recommendation(results)
         recommended = [gr for gr in sorted_results if gr["recommended"]]
@@ -422,7 +424,8 @@ class TestCorePick:
     def test_no_core_when_prob_below_065(self):
         """Edge >= 8 but prob < 0.65 → recommended but no core pick."""
         results = [
-            {"idx": 0, "total_edge_pts": 10.0, "over_probability": 0.62, "under_probability": 0.38},
+            {"idx": 0, "total_edge_pts": 10.0, "signal_score": 25.0,
+             "over_probability": 0.62, "under_probability": 0.38},
         ]
         sorted_results = self._apply_recommendation(results)
         assert sorted_results[0]["recommended"] is True
@@ -431,8 +434,10 @@ class TestCorePick:
     def test_only_one_core_pick(self):
         """Even when multiple games meet core criteria, only 1 is marked."""
         results = [
-            {"idx": 0, "total_edge_pts": 10.0, "over_probability": 0.70, "under_probability": 0.30},
-            {"idx": 1, "total_edge_pts": 9.0, "over_probability": 0.68, "under_probability": 0.32},
+            {"idx": 0, "total_edge_pts": 10.0, "signal_score": 30.0,
+             "over_probability": 0.70, "under_probability": 0.30},
+            {"idx": 1, "total_edge_pts": 9.0, "signal_score": 28.0,
+             "over_probability": 0.68, "under_probability": 0.32},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]

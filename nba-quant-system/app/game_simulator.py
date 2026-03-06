@@ -4,7 +4,8 @@ import numpy as np
 
 # League-wide average parameters
 LEAGUE_AVG_PACE = 99
-LEAGUE_AVG_DEF = 113
+LEAGUE_AVG_OFF = 114
+LEAGUE_AVG_DEF = 114
 
 # Maximum allowed total standard deviation to limit simulation variance
 MAX_TOTAL_STD = 11
@@ -16,7 +17,7 @@ MIN_RECOMMEND_EDGE = 6
 
 # Simulation noise parameters
 PACE_STD = 2        # Standard deviation for pace variation across simulations
-PPP_STD = 0.06      # Standard deviation for points-per-possession variation
+PPP_STD = 0.05      # Standard deviation for points-per-possession variation
 
 
 def run_possession_simulation(

@@ -12,7 +12,7 @@ from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games
 from .feature_engineering import FEATURE_COLUMNS, _compute_team_features
-from .game_simulator import run_possession_simulation, LEAGUE_AVG_PACE, LEAGUE_AVG_DEF
+from .game_simulator import run_possession_simulation, LEAGUE_AVG_PACE, LEAGUE_AVG_OFF, LEAGUE_AVG_DEF
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
@@ -310,15 +310,32 @@ def run_prediction(target_date: str | None = None) -> None:
         home_pace_blend = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
         away_pace_blend = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
 
-        # Game pace: multiplicative model clamped to [92, 105]
-        game_pace = LEAGUE_AVG_PACE * (home_pace_blend / LEAGUE_AVG_PACE) * (away_pace_blend / LEAGUE_AVG_PACE)
-        game_pace = max(92.0, min(105.0, game_pace))
+        # Game pace: simple average clamped to [94, 104]
+        game_pace = (home_pace_blend + away_pace_blend) / 2.0
+        game_pace = max(94.0, min(104.0, game_pace))
 
         # Possession model: PPP with defensive adjustment
         home_ppp = home_off / 100.0
         away_ppp = away_off / 100.0
-        home_adj = home_ppp * (LEAGUE_AVG_DEF / max(away_def, 1.0))
-        away_adj = away_ppp * (LEAGUE_AVG_DEF / max(home_def, 1.0))
+        home_ppp_adj = home_ppp * (LEAGUE_AVG_DEF / max(away_def, 1.0))
+        away_ppp_adj = away_ppp * (LEAGUE_AVG_DEF / max(home_def, 1.0))
+
+        # Offensive structure factors (3P / FT / ORB)
+        # Use league-average defaults when team-level data is unavailable
+        home_3p_rate = float(feat_row.get("home_3p_rate", 0.36))
+        away_3p_rate = float(feat_row.get("away_3p_rate", 0.36))
+        home_ft_rate = float(feat_row.get("home_ft_rate", 0.25))
+        away_ft_rate = float(feat_row.get("away_ft_rate", 0.25))
+        home_orb_rate = float(feat_row.get("home_orb_rate", 0.25))
+        away_orb_rate = float(feat_row.get("away_orb_rate", 0.25))
+
+        three_factor = (home_3p_rate + away_3p_rate) / 2.0
+        ft_factor = (home_ft_rate + away_ft_rate) / 2.0
+        orb_factor = (home_orb_rate + away_orb_rate) / 2.0
+
+        structure_adj = 1.0 + three_factor * 0.15 + ft_factor * 0.12 + orb_factor * 0.10
+        home_adj = home_ppp_adj * structure_adj
+        away_adj = away_ppp_adj * structure_adj
 
         # Base predicted total from possession model
         predicted_total = game_pace * (home_adj + away_adj)
@@ -528,15 +545,37 @@ def run_prediction(target_date: str | None = None) -> None:
             "odds_source": odds_source,
         })
 
-    # --- Daily recommendation: recommend if abs_edge >= 6 ---
+    # --- Daily recommendation ---
+    # Rules: abs_edge < 3 → never recommend; abs_edge >= 6 → always recommend.
+    # Ensure at least 5 games recommended (top 5 by abs_edge).
+    # Core pick = game with largest abs(edge).
+    MIN_DAILY_RECOMMENDATIONS = 5
     if game_results:
-        sorted_results = sorted(game_results, key=lambda x: x["signal_score"], reverse=True)
-        for i, gr in enumerate(sorted_results):
-            gr["recommended"] = abs(gr["total_edge_pts"]) >= 6
+        sorted_results = sorted(game_results, key=lambda x: abs(x["total_edge_pts"]), reverse=True)
+        for gr in sorted_results:
+            abs_edge_val = abs(gr["total_edge_pts"])
+            if abs_edge_val >= 6:
+                gr["recommended"] = True
+            elif abs_edge_val < 3:
+                gr["recommended"] = False
+            else:
+                gr["recommended"] = False
             gr["is_core"] = False
-        # Core pick = highest signal_score among recommended games
+
+        # Ensure at least MIN_DAILY_RECOMMENDATIONS games are recommended
+        recommended_count = sum(1 for gr in sorted_results if gr["recommended"])
+        if recommended_count < MIN_DAILY_RECOMMENDATIONS:
+            for gr in sorted_results:
+                if recommended_count >= MIN_DAILY_RECOMMENDATIONS:
+                    break
+                if not gr["recommended"]:
+                    gr["recommended"] = True
+                    recommended_count += 1
+
+        # Core pick = game with largest abs(edge)
         recommended_results = [gr for gr in sorted_results if gr["recommended"]]
         if recommended_results:
+            # Already sorted by abs(edge) descending, first recommended is core
             recommended_results[0]["is_core"] = True
     else:
         sorted_results = []

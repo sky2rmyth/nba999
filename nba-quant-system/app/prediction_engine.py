@@ -362,25 +362,15 @@ def run_prediction(target_date: str | None = None) -> None:
         away_ppp = calculate_ppp(away_off)
 
         # Efficiency adjustment: apply league-average structure factors
-        home_three_point_rate = LEAGUE_AVG_THREE_POINT_RATE
-        home_free_throw_rate = LEAGUE_AVG_FREE_THROW_RATE
-        home_orb_rate = LEAGUE_AVG_ORB_RATE
-        home_tov_rate = LEAGUE_AVG_TOV_RATE
+        home_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
+        home_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
+        home_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
+        home_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
 
-        home_ppp *= (1 + home_three_point_rate * 0.15)
-        home_ppp *= (1 + home_free_throw_rate * 0.10)
-        home_ppp *= (1 + home_orb_rate * 0.08)
-        home_ppp *= (1 - home_tov_rate * 0.12)
-
-        away_three_point_rate = LEAGUE_AVG_THREE_POINT_RATE
-        away_free_throw_rate = LEAGUE_AVG_FREE_THROW_RATE
-        away_orb_rate = LEAGUE_AVG_ORB_RATE
-        away_tov_rate = LEAGUE_AVG_TOV_RATE
-
-        away_ppp *= (1 + away_three_point_rate * 0.15)
-        away_ppp *= (1 + away_free_throw_rate * 0.10)
-        away_ppp *= (1 + away_orb_rate * 0.08)
-        away_ppp *= (1 - away_tov_rate * 0.12)
+        away_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
+        away_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
+        away_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
+        away_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
 
         # Final predicted total from possession model
         predicted_total = game_pace * (home_ppp + away_ppp)

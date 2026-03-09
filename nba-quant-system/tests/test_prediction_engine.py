@@ -687,11 +687,7 @@ class TestEfficiencyAdjustment:
         game_pace = calculate_game_pace(99.0, 99.0, LEAGUE_AVG_PACE)
         home_ppp = calculate_ppp(112.0)
         away_ppp = calculate_ppp(110.0)
-        for ppp_ref in [home_ppp, away_ppp]:
-            pass  # just verify they compute
         # Apply efficiency adjustments
-        for rate_set in [(home_ppp,), (away_ppp,)]:
-            pass
         home_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
         home_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
         home_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)

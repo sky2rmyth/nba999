@@ -26,6 +26,8 @@ class BallDontLieClient:
         "box_scores": EndpointSpec("/box_scores", {"game_ids[]", "team_ids[]", "per_page", "cursor"}),
         "injuries": EndpointSpec("/injuries", {"team_ids[]", "player_ids[]", "per_page", "cursor"}),
         "betting_odds": EndpointSpec("/betting_odds", {"game_ids", "bookmaker", "per_page", "cursor", "start_date", "end_date"}),
+        "game_advanced_stats": EndpointSpec("/game_advanced_stats", {"game_ids[]", "per_page", "cursor", "page"}),
+        "player_injuries": EndpointSpec("/player_injuries", {"team_ids[]", "player_ids[]", "per_page", "cursor", "page"}),
     }
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None, timeout: int = 30) -> None:
@@ -69,6 +71,24 @@ class BallDontLieClient:
                 break
         return out
 
+    def fetch_all_pages_paged(self, endpoint: str, params: dict[str, Any] | None = None, page_limit: int = 100) -> list[dict[str, Any]]:
+        """Auto-paginate using page/per_page with meta.next_page."""
+        params = dict(params or {})
+        out: list[dict[str, Any]] = []
+        page = params.pop("page", 1)
+        pages_fetched = 0
+        while pages_fetched < page_limit:
+            params["page"] = page
+            payload = self._request(endpoint, params)
+            out.extend(payload.get("data", []))
+            meta = payload.get("meta", {})
+            next_page = meta.get("next_page")
+            pages_fetched += 1
+            if next_page is None:
+                break
+            page = next_page
+        return out
+
     def get_game(self, game_id: int) -> dict[str, Any]:
         """Fetch a single game by its ID via ``/games/{game_id}``."""
         url = f"{self.base_url}/games/{game_id}"
@@ -104,6 +124,12 @@ class BallDontLieClient:
 
     def betting_odds(self, **params: Any) -> list[dict[str, Any]]:
         return self.fetch_all_pages("betting_odds", params)
+
+    def game_advanced_stats(self, **params: Any) -> list[dict[str, Any]]:
+        return self.fetch_all_pages("game_advanced_stats", params)
+
+    def player_injuries(self, **params: Any) -> list[dict[str, Any]]:
+        return self.fetch_all_pages("player_injuries", params)
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +170,14 @@ def get_box_scores(game_id: int) -> list[dict[str, Any]]:
 
 def get_injuries() -> list[dict[str, Any]]:
     return _default_client().injuries(per_page=100)
+
+
+def get_game_advanced_stats(game_id: int) -> list[dict[str, Any]]:
+    return _default_client().game_advanced_stats(**{"game_ids[]": [game_id], "per_page": 100})
+
+
+def get_player_injuries() -> list[dict[str, Any]]:
+    return _default_client().player_injuries(per_page=100)
 
 
 def get_betting_odds(game_id: int) -> list[dict[str, Any]]:

@@ -1,6 +1,8 @@
 """Tests for data_pipeline advanced metrics functions."""
 from __future__ import annotations
 
+from unittest import mock
+
 import pytest
 
 from app.data_pipeline import (
@@ -8,6 +10,11 @@ from app.data_pipeline import (
     calculate_pace,
     offensive_rating,
     defensive_rating,
+)
+from app.feature_engineering import (
+    calculate_possessions_from_boxscore,
+    calculate_game_pace,
+    calculate_ppp,
 )
 
 
@@ -129,3 +136,204 @@ class TestPossessionBasedMetrics:
         pace = (calculate_pace(home_stats) + calculate_pace(away_stats)) / 2.0
         predicted_total = pace * (home_off / 100 + away_off / 100)
         assert 210 <= predicted_total <= 240
+
+
+class TestCalculatePossessionsFromBoxscore:
+    """Test calculate_possessions_from_boxscore: FGA - OREB + TOV + 0.44 * FTA."""
+
+    def test_typical_boxscore(self):
+        bs = {"fga": 88, "oreb": 10, "turnovers": 14, "fta": 22}
+        poss = calculate_possessions_from_boxscore(bs)
+        # 88 - 10 + 14 + 0.44*22 = 88 - 10 + 14 + 9.68 = 101.68
+        assert abs(poss - 101.68) < 0.01
+
+    def test_empty_boxscore_returns_minimum(self):
+        poss = calculate_possessions_from_boxscore({})
+        assert poss == 1
+
+    def test_high_scoring_boxscore(self):
+        bs = {"fga": 95, "oreb": 12, "turnovers": 16, "fta": 30}
+        poss = calculate_possessions_from_boxscore(bs)
+        # 95 - 12 + 16 + 0.44*30 = 95 - 12 + 16 + 13.2 = 112.2
+        assert abs(poss - 112.2) < 0.01
+
+    def test_never_below_one(self):
+        bs = {"fga": 0, "oreb": 100, "turnovers": 0, "fta": 0}
+        poss = calculate_possessions_from_boxscore(bs)
+        assert poss == 1
+
+
+class TestCalculateGamePace:
+    """Test calculate_game_pace: simple average of home and away pace."""
+
+    def test_average(self):
+        assert calculate_game_pace(100.0, 98.0) == 99.0
+
+    def test_equal(self):
+        assert calculate_game_pace(100.0, 100.0) == 100.0
+
+    def test_high_paces(self):
+        assert calculate_game_pace(110.0, 108.0) == 109.0
+
+
+class TestCalculatePPP:
+    """Test calculate_ppp: off_rating / 100."""
+
+    def test_typical(self):
+        assert calculate_ppp(112.0) == 1.12
+
+    def test_low(self):
+        assert calculate_ppp(100.0) == 1.0
+
+    def test_high(self):
+        assert calculate_ppp(120.0) == 1.2
+
+
+# ---------- API client: new endpoints ----------
+
+class TestGameAdvancedStatsEndpoint:
+    """Test game_advanced_stats endpoint registration and convenience methods."""
+
+    def test_endpoint_registered(self):
+        from app.api_client import BallDontLieClient
+        assert "game_advanced_stats" in BallDontLieClient.ENDPOINTS
+        spec = BallDontLieClient.ENDPOINTS["game_advanced_stats"]
+        assert spec.path == "/game_advanced_stats"
+        assert "game_ids[]" in spec.allowed_params
+        assert "per_page" in spec.allowed_params
+
+    def test_game_advanced_stats_calls_fetch(self):
+        from app.api_client import BallDontLieClient
+        with mock.patch("app.api_client.requests.get") as mock_get:
+            mock_get.return_value.json.return_value = {
+                "data": [{"team_id": 1, "off_rating": 112.5, "def_rating": 108.0, "pace": 100.1}],
+                "meta": {},
+            }
+            mock_get.return_value.raise_for_status = mock.MagicMock()
+            client = BallDontLieClient(api_key="test-key")
+            result = client.game_advanced_stats(**{"game_ids[]": [42], "per_page": 100})
+        assert len(result) == 1
+        assert result[0]["off_rating"] == 112.5
+
+    def test_module_level_get_game_advanced_stats(self):
+        from app import api_client
+        with mock.patch.object(api_client, "_default_client") as mock_client:
+            mock_client.return_value.game_advanced_stats.return_value = [
+                {"team_id": 1, "pace": 99.5},
+            ]
+            result = api_client.get_game_advanced_stats(42)
+        assert len(result) == 1
+        assert result[0]["pace"] == 99.5
+
+
+class TestPlayerInjuriesEndpoint:
+    """Test player_injuries endpoint registration and convenience methods."""
+
+    def test_endpoint_registered(self):
+        from app.api_client import BallDontLieClient
+        assert "player_injuries" in BallDontLieClient.ENDPOINTS
+        spec = BallDontLieClient.ENDPOINTS["player_injuries"]
+        assert spec.path == "/player_injuries"
+        assert "per_page" in spec.allowed_params
+
+    def test_player_injuries_calls_fetch(self):
+        from app.api_client import BallDontLieClient
+        with mock.patch("app.api_client.requests.get") as mock_get:
+            mock_get.return_value.json.return_value = {
+                "data": [{"player_id": 10, "team_id": 1, "status": "Out"}],
+                "meta": {},
+            }
+            mock_get.return_value.raise_for_status = mock.MagicMock()
+            client = BallDontLieClient(api_key="test-key")
+            result = client.player_injuries(per_page=100)
+        assert len(result) == 1
+        assert result[0]["status"] == "Out"
+
+    def test_module_level_get_player_injuries(self):
+        from app import api_client
+        with mock.patch.object(api_client, "_default_client") as mock_client:
+            mock_client.return_value.player_injuries.return_value = [
+                {"player_id": 10, "team_id": 1, "status": "Out"},
+            ]
+            result = api_client.get_player_injuries()
+        assert len(result) == 1
+        assert result[0]["player_id"] == 10
+
+
+# ---------- Page-based pagination ----------
+
+class TestPageBasedPagination:
+    """Test fetch_all_pages_paged auto-pagination with next_page."""
+
+    def test_single_page(self):
+        from app.api_client import BallDontLieClient
+        with mock.patch("app.api_client.requests.get") as mock_get:
+            mock_get.return_value.json.return_value = {
+                "data": [{"id": 1}],
+                "meta": {"next_page": None, "total_pages": 1},
+            }
+            mock_get.return_value.raise_for_status = mock.MagicMock()
+            client = BallDontLieClient(api_key="test-key")
+            result = client.fetch_all_pages_paged("game_advanced_stats", {"per_page": 25})
+        assert len(result) == 1
+
+    def test_multi_page(self):
+        from app.api_client import BallDontLieClient
+        responses = [
+            {"data": [{"id": 1}], "meta": {"next_page": 2, "total_pages": 3}},
+            {"data": [{"id": 2}], "meta": {"next_page": 3, "total_pages": 3}},
+            {"data": [{"id": 3}], "meta": {"next_page": None, "total_pages": 3}},
+        ]
+        with mock.patch("app.api_client.requests.get") as mock_get:
+            mock_get.return_value.raise_for_status = mock.MagicMock()
+            mock_get.return_value.json.side_effect = responses
+            client = BallDontLieClient(api_key="test-key")
+            result = client.fetch_all_pages_paged("game_advanced_stats", {"per_page": 1})
+        assert len(result) == 3
+        assert [r["id"] for r in result] == [1, 2, 3]
+
+    def test_page_limit_respected(self):
+        from app.api_client import BallDontLieClient
+        with mock.patch("app.api_client.requests.get") as mock_get:
+            mock_get.return_value.json.return_value = {
+                "data": [{"id": 1}],
+                "meta": {"next_page": 2, "total_pages": 100},
+            }
+            mock_get.return_value.raise_for_status = mock.MagicMock()
+            client = BallDontLieClient(api_key="test-key")
+            result = client.fetch_all_pages_paged("game_advanced_stats", {"per_page": 1}, page_limit=2)
+        # Only 2 pages fetched even though next_page keeps returning 2
+        assert len(result) == 2
+
+
+# ---------- Data pipeline: fetch_game_advanced_stats ----------
+
+class TestFetchGameAdvancedStats:
+    """Test data_pipeline.fetch_game_advanced_stats."""
+
+    def test_returns_keyed_by_team_id(self):
+        from app.data_pipeline import fetch_game_advanced_stats
+        fake_data = [
+            {"team_id": 1, "off_rating": 112.5, "def_rating": 108.0,
+             "pace": 100.1, "ts_pct": 0.58, "efg_pct": 0.54,
+             "ast_pct": 0.60, "reb_pct": 0.50, "tov_pct": 0.12},
+            {"team_id": 2, "off_rating": 110.0, "def_rating": 109.5,
+             "pace": 99.3, "ts_pct": 0.57, "efg_pct": 0.53,
+             "ast_pct": 0.58, "reb_pct": 0.49, "tov_pct": 0.13},
+        ]
+        with mock.patch("app.data_pipeline.BallDontLieClient") as MockClient:
+            MockClient.return_value.game_advanced_stats.return_value = fake_data
+            result = fetch_game_advanced_stats(42)
+
+        assert 1 in result
+        assert 2 in result
+        assert result[1]["off_rating"] == 112.5
+        assert result[2]["pace"] == 99.3
+        assert result[1]["efg_pct"] == 0.54
+
+    def test_empty_response(self):
+        from app.data_pipeline import fetch_game_advanced_stats
+        with mock.patch("app.data_pipeline.BallDontLieClient") as MockClient:
+            MockClient.return_value.game_advanced_stats.return_value = []
+            result = fetch_game_advanced_stats(999)
+        assert result == {}

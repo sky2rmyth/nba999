@@ -17,6 +17,35 @@ from .data_pipeline import (
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Possession-model helper functions
+# ---------------------------------------------------------------------------
+
+def calculate_possessions_from_boxscore(boxscore: dict) -> float:
+    """Calculate possessions from a box-score dict.
+
+    Keys expected: ``fga``, ``oreb``, ``turnovers``, ``fta``.
+    """
+    fga = boxscore.get("fga", 0)
+    orb = boxscore.get("oreb", 0)
+    tov = boxscore.get("turnovers", 0)
+    fta = boxscore.get("fta", 0)
+
+    poss = fga - orb + tov + 0.44 * fta  # 0.44 = FT possession factor
+    return max(poss, 1)
+
+
+def calculate_game_pace(home_pace: float, away_pace: float) -> float:
+    """Calculate expected game pace as the simple average of both teams."""
+    return (home_pace + away_pace) / 2
+
+
+def calculate_ppp(off_rating: float) -> float:
+    """Convert offensive rating to Points Per Possession."""
+    return off_rating / 100
+
+
 FEATURE_COLUMNS = [
     # Team offensive/defensive ratings
     "home_off_rating",
@@ -135,8 +164,6 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     feat[f"{prefix}_net_rating"] = feat[f"{prefix}_off_rating"] - feat[f"{prefix}_def_rating"]
     feat[f"{prefix}_pace"] = pace
 
-    if pace > 110:
-        logger.warning("PACE OUTLIER DETECTED: %s pace=%.1f", prefix, pace)
     off_rtg = feat[f"{prefix}_off_rating"]
     if off_rtg < 105 or off_rtg > 125:
         logger.warning("OFF RATING OUT OF RANGE: %s off_rating=%.1f", prefix, off_rtg)

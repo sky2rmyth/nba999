@@ -37,10 +37,13 @@ def calculate_possessions_from_boxscore(boxscore: dict) -> float:
 
 
 def calculate_game_pace(home_pace: float, away_pace: float) -> float:
-    """Calculate expected game pace as simple average, clamped to [97, 101]."""
-    game_pace = (home_pace + away_pace) / 2
-    game_pace = max(97, min(game_pace, 101))
-    return game_pace
+    """Calculate expected game pace using matchup pace formula.
+
+    The faster team is weighted slightly more (0.55) than the slower team (0.45).
+    """
+    fast = max(home_pace, away_pace)
+    slow = min(home_pace, away_pace)
+    return 0.55 * fast + 0.45 * slow
 
 
 def calculate_ppp(off_rating: float) -> float:

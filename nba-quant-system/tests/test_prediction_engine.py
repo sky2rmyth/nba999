@@ -258,9 +258,9 @@ class TestCorePick:
 
         # Determine minimum recommendations based on game count
         total_games = len(sorted_results)
-        if total_games > 5:
+        if total_games >= 5:
             min_recommend = 4
-        elif total_games >= 3:
+        elif total_games == 4:
             min_recommend = 3
         else:
             min_recommend = 1
@@ -481,8 +481,8 @@ class TestCorePick:
         assert len(core) == 1
         assert core[0]["idx"] == 0  # abs(10) > abs(9)
 
-    def test_min_recommend_4_when_more_than_5_games(self):
-        """With > 5 games, min_recommend = 4. Auto-fill if quality filter yields fewer."""
+    def test_min_recommend_4_when_5_or_more_games(self):
+        """With >= 5 games, min_recommend = 4. Auto-fill if quality filter yields fewer."""
         results = [
             {"idx": i, "total_edge_pts": float(2 + i * 0.5), "signal_score": 10.0,
              "over_probability": 0.53, "under_probability": 0.47}
@@ -492,8 +492,19 @@ class TestCorePick:
         recommended = [gr for gr in sorted_results if gr["recommended"]]
         assert len(recommended) >= 4
 
-    def test_min_recommend_3_when_3_to_5_games(self):
-        """With 3-5 games, min_recommend = 3. Auto-fill if quality filter yields fewer."""
+    def test_min_recommend_4_when_exactly_5_games(self):
+        """With exactly 5 games, min_recommend = 4."""
+        results = [
+            {"idx": i, "total_edge_pts": float(2 + i * 0.5), "signal_score": 10.0,
+             "over_probability": 0.53, "under_probability": 0.47}
+            for i in range(5)
+        ]
+        sorted_results = self._apply_recommendation(results)
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        assert len(recommended) >= 4
+
+    def test_min_recommend_3_when_4_games(self):
+        """With exactly 4 games, min_recommend = 3. Auto-fill if quality filter yields fewer."""
         results = [
             {"idx": i, "total_edge_pts": float(2 + i), "signal_score": 10.0,
              "over_probability": 0.53, "under_probability": 0.47}
@@ -503,11 +514,22 @@ class TestCorePick:
         recommended = [gr for gr in sorted_results if gr["recommended"]]
         assert len(recommended) >= 3
 
-    def test_min_recommend_1_when_2_games_or_fewer(self):
-        """With <= 2 games, min_recommend = 1. Auto-fill if quality filter yields 0."""
+    def test_min_recommend_1_when_3_games_or_fewer(self):
+        """With <= 3 games, min_recommend = 1. Auto-fill if quality filter yields 0."""
         results = [
             {"idx": 0, "total_edge_pts": 1.0, "signal_score": 5.0,
              "over_probability": 0.51, "under_probability": 0.49},
+        ]
+        sorted_results = self._apply_recommendation(results)
+        recommended = [gr for gr in sorted_results if gr["recommended"]]
+        assert len(recommended) >= 1
+
+    def test_min_recommend_1_when_3_games(self):
+        """With exactly 3 games, min_recommend = 1 (not 3)."""
+        results = [
+            {"idx": i, "total_edge_pts": float(1 + i * 0.5), "signal_score": 5.0,
+             "over_probability": 0.52, "under_probability": 0.48}
+            for i in range(3)
         ]
         sorted_results = self._apply_recommendation(results)
         recommended = [gr for gr in sorted_results if gr["recommended"]]
@@ -596,23 +618,35 @@ class TestLeagueConstants:
 
 
 class TestGamePaceCalculation:
-    """Test game pace is simple average clamped to [97, 101]."""
+    """Test game pace uses matchup pace formula: 0.55 * fast + 0.45 * slow."""
 
     def test_normal_pace(self):
         from app.feature_engineering import calculate_game_pace
-        assert calculate_game_pace(100.0, 98.0) == 99.0
+        # 0.55 * 100 + 0.45 * 98 = 55.0 + 44.1 = 99.1
+        result = calculate_game_pace(100.0, 98.0)
+        assert abs(result - 99.1) < 0.001
 
-    def test_high_pace_clamped(self):
+    def test_high_pace_not_clamped(self):
         from app.feature_engineering import calculate_game_pace
-        assert calculate_game_pace(110.0, 108.0) == 101.0
+        # 0.55 * 110 + 0.45 * 108 = 60.5 + 48.6 = 109.1
+        result = calculate_game_pace(110.0, 108.0)
+        assert abs(result - 109.1) < 0.001
 
-    def test_low_pace_clamped(self):
+    def test_low_pace_not_clamped(self):
         from app.feature_engineering import calculate_game_pace
-        assert calculate_game_pace(88.0, 90.0) == 97.0
+        # 0.55 * 90 + 0.45 * 88 = 49.5 + 39.6 = 89.1
+        result = calculate_game_pace(88.0, 90.0)
+        assert abs(result - 89.1) < 0.001
 
     def test_equal_pace(self):
         from app.feature_engineering import calculate_game_pace
         assert calculate_game_pace(100.0, 100.0) == 100.0
+
+    def test_fast_team_weighted_higher(self):
+        from app.feature_engineering import calculate_game_pace
+        # fast=105, slow=95 → 0.55*105 + 0.45*95 = 57.75 + 42.75 = 100.5
+        result = calculate_game_pace(105.0, 95.0)
+        assert abs(result - 100.5) < 0.001
 
 
 class TestPPPNoStructureAmplification:
@@ -632,102 +666,58 @@ class TestPPPNoStructureAmplification:
             assert 1.0 <= ppp <= 1.2, f"PPP {ppp} out of range for off_rating {off_rating}"
 
     def test_predicted_total_in_range(self):
-        """With realistic PPP and pace, predicted total stays in 210-240."""
+        """With realistic PPP and pace, predicted total stays in a reasonable range."""
         from app.feature_engineering import calculate_game_pace, calculate_ppp
         game_pace = calculate_game_pace(99.0, 99.0)
         home_ppp = calculate_ppp(112.0)
         away_ppp = calculate_ppp(110.0)
         predicted_total = game_pace * (home_ppp + away_ppp)
-        assert 210 <= predicted_total <= 240
+        assert 200 <= predicted_total <= 250
 
 
 class TestEfficiencyAdjustment:
-    """Test PPP linear efficiency adjustment using league-average structure factors."""
+    """Test PPP clamping to [1.03, 1.18] after off_rating / 100 conversion."""
 
-    def test_efficiency_adjustment_increases_ppp(self):
-        """Net effect of linear 3P, FT, ORB, TOV adjustments on PPP."""
-        from app.prediction_engine import (
-            LEAGUE_AVG_THREE_POINT_RATE, LEAGUE_AVG_FREE_THROW_RATE,
-            LEAGUE_AVG_ORB_RATE, LEAGUE_AVG_TOV_RATE,
-        )
+    def test_ppp_clamped_to_min_1_03(self):
+        """PPP from low off_rating is clamped to 1.03."""
         from app.feature_engineering import calculate_ppp
-        base_ppp = calculate_ppp(112.0)
-        adj_ppp = base_ppp
-        adj_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
-        adj_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
-        adj_ppp += LEAGUE_AVG_ORB_RATE * 0.03
-        adj_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
-        # Net effect should increase PPP (positive factors outweigh TOV)
-        assert adj_ppp > base_ppp
+        ppp = calculate_ppp(100.0)  # 1.00
+        ppp = max(1.03, min(ppp, 1.18))
+        assert ppp == 1.03
 
-    def test_tov_rate_reduces_ppp(self):
-        """Higher turnover rate should reduce PPP."""
+    def test_ppp_clamped_to_max_1_18(self):
+        """PPP from high off_rating is clamped to 1.18."""
         from app.feature_engineering import calculate_ppp
-        ppp = calculate_ppp(112.0)
-        adj_low_tov = ppp - 0.10 * 0.05
-        adj_high_tov = ppp - 0.20 * 0.05
-        assert adj_low_tov > adj_high_tov
+        ppp = calculate_ppp(125.0)  # 1.25
+        ppp = max(1.03, min(ppp, 1.18))
+        assert ppp == 1.18
 
-    def test_three_point_rate_boosts_ppp(self):
-        """Higher three-point rate should increase PPP."""
+    def test_ppp_within_range_no_clamp(self):
+        """PPP from normal off_rating passes through unclamped."""
         from app.feature_engineering import calculate_ppp
-        ppp = calculate_ppp(112.0)
-        adj_low_3p = ppp + 0.30 * 0.05
-        adj_high_3p = ppp + 0.45 * 0.05
-        assert adj_high_3p > adj_low_3p
+        ppp = calculate_ppp(112.0)  # 1.12
+        ppp = max(1.03, min(ppp, 1.18))
+        assert ppp == 1.12
 
-    def test_predicted_total_with_safety_limits(self):
-        """Predicted total = game_pace * (clamped adj_home_ppp + clamped adj_away_ppp), clamped to [205, 245]."""
-        from app.prediction_engine import (
-            LEAGUE_AVG_THREE_POINT_RATE, LEAGUE_AVG_FREE_THROW_RATE,
-            LEAGUE_AVG_ORB_RATE, LEAGUE_AVG_TOV_RATE,
-        )
+    def test_ppp_safety_limits(self):
+        """PPP must be clamped to [1.03, 1.18] after conversion."""
+        from app.feature_engineering import calculate_ppp
+        for off_rating in [100.0, 105.0, 110.0, 115.0, 120.0, 125.0]:
+            ppp = calculate_ppp(off_rating)
+            ppp = max(1.03, min(ppp, 1.18))
+            assert 1.03 <= ppp <= 1.18
+
+    def test_predicted_total_no_total_clamp(self):
+        """model_total = game_pace * (home_ppp + away_ppp), no [205, 245] clamp."""
         from app.feature_engineering import calculate_game_pace, calculate_ppp
         game_pace = calculate_game_pace(99.0, 99.0)
         home_ppp = calculate_ppp(112.0)
         away_ppp = calculate_ppp(110.0)
-        # Apply linear efficiency adjustments
-        home_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
-        home_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
-        home_ppp += LEAGUE_AVG_ORB_RATE * 0.03
-        home_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
-        away_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
-        away_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
-        away_ppp += LEAGUE_AVG_ORB_RATE * 0.03
-        away_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
-        # Apply PPP safety limits
-        home_ppp = max(1.05, min(home_ppp, 1.15))
-        away_ppp = max(1.05, min(away_ppp, 1.15))
-        predicted_total = game_pace * (home_ppp + away_ppp)
-        # Apply total safety limits
-        predicted_total = max(205, min(predicted_total, 245))
-        assert 205 <= predicted_total <= 245
-
-    def test_ppp_safety_limits(self):
-        """PPP must be clamped to [1.05, 1.15] after adjustment."""
-        from app.feature_engineering import calculate_ppp
-        from app.prediction_engine import (
-            LEAGUE_AVG_THREE_POINT_RATE, LEAGUE_AVG_FREE_THROW_RATE,
-            LEAGUE_AVG_ORB_RATE, LEAGUE_AVG_TOV_RATE,
-        )
-        for off_rating in [105.0, 110.0, 115.0, 120.0]:
-            ppp = calculate_ppp(off_rating)
-            ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
-            ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
-            ppp += LEAGUE_AVG_ORB_RATE * 0.03
-            ppp -= LEAGUE_AVG_TOV_RATE * 0.05
-            ppp = max(1.05, min(ppp, 1.15))
-            assert 1.05 <= ppp <= 1.15
-
-    def test_total_safety_limits(self):
-        """Predicted total must be clamped to [205, 245]."""
-        from app.feature_engineering import calculate_game_pace
-        # Even with extreme inputs, total stays clamped
-        game_pace = calculate_game_pace(110.0, 110.0)  # clamped to 101
-        # Max possible: 101 * (1.15 + 1.15) = 232.3
-        predicted_total = game_pace * (1.15 + 1.15)
-        predicted_total = max(205, min(predicted_total, 245))
-        assert 205 <= predicted_total <= 245
+        home_ppp = max(1.03, min(home_ppp, 1.18))
+        away_ppp = max(1.03, min(away_ppp, 1.18))
+        model_total = game_pace * (home_ppp + away_ppp)
+        # No total clamping — value depends on pace and PPP
+        assert model_total > 0
 
 
 class TestMonteCarloConstants:

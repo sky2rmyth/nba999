@@ -168,17 +168,20 @@ class TestCalculatePossessionsFromBoxscore:
 
 
 class TestCalculateGamePace:
-    """Test calculate_game_pace: simple average clamped to [97, 101]."""
+    """Test calculate_game_pace: matchup pace formula (0.55 * fast + 0.45 * slow)."""
 
     def test_average(self):
-        assert calculate_game_pace(100.0, 98.0) == 99.0
+        # 0.55 * 100 + 0.45 * 98 = 55.0 + 44.1 = 99.1
+        result = calculate_game_pace(100.0, 98.0)
+        assert abs(result - 99.1) < 0.001
 
     def test_equal(self):
         assert calculate_game_pace(100.0, 100.0) == 100.0
 
-    def test_high_paces_clamped(self):
-        # (110 + 108) / 2 = 109 → clamped to 101
-        assert calculate_game_pace(110.0, 108.0) == 101.0
+    def test_high_paces_not_clamped(self):
+        # 0.55 * 110 + 0.45 * 108 = 60.5 + 48.6 = 109.1
+        result = calculate_game_pace(110.0, 108.0)
+        assert abs(result - 109.1) < 0.001
 
 
 class TestCalculatePPP:
@@ -247,30 +250,32 @@ class TestCalculateTovRate:
 
 
 class TestPaceClamping:
-    """Test calculate_game_pace clamping to [97, 101]."""
+    """Test calculate_game_pace matchup pace formula (no clamping)."""
 
-    def test_normal_pace_no_clamp(self):
-        """Pace within range is unchanged."""
+    def test_normal_pace(self):
+        """Pace within typical range uses matchup formula."""
         result = calculate_game_pace(99.0, 99.0)
         assert result == 99.0
 
-    def test_high_pace_clamped_to_101(self):
-        """Fast teams get clamped to 101."""
+    def test_high_pace_not_clamped(self):
+        """Fast teams are not clamped — matchup formula applies."""
+        # 0.55 * 110 + 0.45 * 108 = 109.1
         result = calculate_game_pace(110.0, 108.0)
-        assert result == 101.0
+        assert abs(result - 109.1) < 0.001
 
-    def test_low_pace_clamped_to_97(self):
-        """Slow teams get clamped to 97."""
+    def test_low_pace_not_clamped(self):
+        """Slow teams are not clamped — matchup formula applies."""
+        # 0.55 * 90 + 0.45 * 88 = 49.5 + 39.6 = 89.1
         result = calculate_game_pace(88.0, 90.0)
-        assert result == 97.0
+        assert abs(result - 89.1) < 0.001
 
-    def test_boundary_97(self):
-        """Pace exactly at 97 stays at 97."""
+    def test_equal_97(self):
+        """Equal pace at 97."""
         result = calculate_game_pace(97.0, 97.0)
         assert result == 97.0
 
-    def test_boundary_101(self):
-        """Pace exactly at 101 stays at 101."""
+    def test_equal_101(self):
+        """Equal pace at 101."""
         result = calculate_game_pace(101.0, 101.0)
         assert result == 101.0
 

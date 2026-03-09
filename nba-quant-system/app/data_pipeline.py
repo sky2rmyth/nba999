@@ -86,8 +86,8 @@ def fetch_player_injuries() -> list[dict]:
 def fetch_game_advanced_stats(game_id: int) -> dict:
     """Fetch game advanced stats from the balldontlie GOAT endpoint.
 
-    Returns a dict with off_rating, def_rating, pace, ts_pct, efg_pct,
-    ast_pct, reb_pct, tov_pct for the given game.
+    Returns a ``dict[int, dict]`` keyed by ``team_id``.  Each value contains
+    off_rating, def_rating, pace, ts_pct, efg_pct, ast_pct, reb_pct, tov_pct.
     """
     client = BallDontLieClient()
     data = client.game_advanced_stats(**{"game_ids[]": [game_id], "per_page": 100})

@@ -168,7 +168,7 @@ class TestCalculatePossessionsFromBoxscore:
 
 
 class TestCalculateGamePace:
-    """Test calculate_game_pace: simple average clamped to [96, 103]."""
+    """Test calculate_game_pace: simple average clamped to [97, 101]."""
 
     def test_average(self):
         assert calculate_game_pace(100.0, 98.0) == 99.0
@@ -177,8 +177,8 @@ class TestCalculateGamePace:
         assert calculate_game_pace(100.0, 100.0) == 100.0
 
     def test_high_paces_clamped(self):
-        # (110 + 108) / 2 = 109 → clamped to 103
-        assert calculate_game_pace(110.0, 108.0) == 103.0
+        # (110 + 108) / 2 = 109 → clamped to 101
+        assert calculate_game_pace(110.0, 108.0) == 101.0
 
 
 class TestCalculatePPP:
@@ -247,32 +247,32 @@ class TestCalculateTovRate:
 
 
 class TestPaceClamping:
-    """Test calculate_game_pace clamping to [96, 103]."""
+    """Test calculate_game_pace clamping to [97, 101]."""
 
     def test_normal_pace_no_clamp(self):
         """Pace within range is unchanged."""
         result = calculate_game_pace(99.0, 99.0)
         assert result == 99.0
 
-    def test_high_pace_clamped_to_103(self):
-        """Fast teams get clamped to 103."""
+    def test_high_pace_clamped_to_101(self):
+        """Fast teams get clamped to 101."""
         result = calculate_game_pace(110.0, 108.0)
-        assert result == 103.0
+        assert result == 101.0
 
-    def test_low_pace_clamped_to_96(self):
-        """Slow teams get clamped to 96."""
+    def test_low_pace_clamped_to_97(self):
+        """Slow teams get clamped to 97."""
         result = calculate_game_pace(88.0, 90.0)
-        assert result == 96.0
+        assert result == 97.0
 
-    def test_boundary_96(self):
-        """Pace exactly at 96 stays at 96."""
-        result = calculate_game_pace(96.0, 96.0)
-        assert result == 96.0
+    def test_boundary_97(self):
+        """Pace exactly at 97 stays at 97."""
+        result = calculate_game_pace(97.0, 97.0)
+        assert result == 97.0
 
-    def test_boundary_103(self):
-        """Pace exactly at 103 stays at 103."""
-        result = calculate_game_pace(103.0, 103.0)
-        assert result == 103.0
+    def test_boundary_101(self):
+        """Pace exactly at 101 stays at 101."""
+        result = calculate_game_pace(101.0, 101.0)
+        assert result == 101.0
 
 
 # ---------- API client: new endpoints ----------

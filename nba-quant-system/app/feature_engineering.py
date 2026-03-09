@@ -37,9 +37,9 @@ def calculate_possessions_from_boxscore(boxscore: dict) -> float:
 
 
 def calculate_game_pace(home_pace: float, away_pace: float) -> float:
-    """Calculate expected game pace as simple average, clamped to [96, 103]."""
+    """Calculate expected game pace as simple average, clamped to [97, 101]."""
     game_pace = (home_pace + away_pace) / 2
-    game_pace = max(96, min(game_pace, 103))
+    game_pace = max(97, min(game_pace, 101))
     return game_pace
 
 

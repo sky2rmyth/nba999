@@ -596,7 +596,7 @@ class TestLeagueConstants:
 
 
 class TestGamePaceCalculation:
-    """Test game pace is simple average clamped to [96, 103]."""
+    """Test game pace is simple average clamped to [97, 101]."""
 
     def test_normal_pace(self):
         from app.feature_engineering import calculate_game_pace
@@ -604,11 +604,11 @@ class TestGamePaceCalculation:
 
     def test_high_pace_clamped(self):
         from app.feature_engineering import calculate_game_pace
-        assert calculate_game_pace(110.0, 108.0) == 103.0
+        assert calculate_game_pace(110.0, 108.0) == 101.0
 
     def test_low_pace_clamped(self):
         from app.feature_engineering import calculate_game_pace
-        assert calculate_game_pace(88.0, 90.0) == 96.0
+        assert calculate_game_pace(88.0, 90.0) == 97.0
 
     def test_equal_pace(self):
         from app.feature_engineering import calculate_game_pace
@@ -723,8 +723,8 @@ class TestEfficiencyAdjustment:
         """Predicted total must be clamped to [205, 245]."""
         from app.feature_engineering import calculate_game_pace
         # Even with extreme inputs, total stays clamped
-        game_pace = calculate_game_pace(110.0, 110.0)  # clamped to 103
-        # Max possible: 103 * (1.15 + 1.15) = 236.9
+        game_pace = calculate_game_pace(110.0, 110.0)  # clamped to 101
+        # Max possible: 101 * (1.15 + 1.15) = 232.3
         predicted_total = game_pace * (1.15 + 1.15)
         predicted_total = max(205, min(predicted_total, 245))
         assert 205 <= predicted_total <= 245
@@ -740,3 +740,36 @@ class TestMonteCarloConstants:
     def test_mc_runs(self):
         from app.prediction_engine import MIN_SIMULATION_COUNT
         assert MIN_SIMULATION_COUNT == 10000
+
+
+class TestMarketAnchor:
+    """Test Market Anchor blending: predicted_total = 0.65 * model_total + 0.35 * closing_line."""
+
+    def test_blend_formula(self):
+        """Market anchor blends model total (65%) with closing line (35%)."""
+        model_total = 230.0
+        closing_line = 220.0
+        predicted_total = 0.65 * model_total + 0.35 * closing_line
+        expected = 0.65 * 230.0 + 0.35 * 220.0  # 149.5 + 77.0 = 226.5
+        assert abs(predicted_total - expected) < 0.01
+
+    def test_blend_pulls_toward_closing(self):
+        """Blending should pull model total toward the closing line."""
+        model_total = 240.0
+        closing_line = 220.0
+        predicted_total = 0.65 * model_total + 0.35 * closing_line
+        assert model_total > predicted_total > closing_line
+
+    def test_blend_equal_values(self):
+        """When model total equals closing line, blended result is the same."""
+        model_total = 225.0
+        closing_line = 225.0
+        predicted_total = 0.65 * model_total + 0.35 * closing_line
+        assert abs(predicted_total - 225.0) < 0.01
+
+    def test_blend_closing_higher(self):
+        """When closing line is higher than model total, blend is between them."""
+        model_total = 215.0
+        closing_line = 230.0
+        predicted_total = 0.65 * model_total + 0.35 * closing_line
+        assert model_total < predicted_total < closing_line

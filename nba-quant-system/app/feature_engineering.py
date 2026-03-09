@@ -36,18 +36,10 @@ def calculate_possessions_from_boxscore(boxscore: dict) -> float:
     return max(poss, 1)
 
 
-def calculate_game_pace(home_pace: float, away_pace: float,
-                        league_avg_pace: float | None = None) -> float:
-    """Calculate expected game pace.
-
-    When *league_avg_pace* is provided the pace-matchup adjustment is applied:
-    deviations from the league average are amplified by 30 %.
-    """
+def calculate_game_pace(home_pace: float, away_pace: float) -> float:
+    """Calculate expected game pace as simple average, clamped to [96, 103]."""
     game_pace = (home_pace + away_pace) / 2
-    if league_avg_pace is not None:
-        pace_adjustment = (home_pace - league_avg_pace) * 0.3
-        pace_adjustment += (away_pace - league_avg_pace) * 0.3
-        game_pace += pace_adjustment
+    game_pace = max(96, min(game_pace, 103))
     return game_pace
 
 

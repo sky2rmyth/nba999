@@ -168,7 +168,7 @@ class TestCalculatePossessionsFromBoxscore:
 
 
 class TestCalculateGamePace:
-    """Test calculate_game_pace: simple average of home and away pace."""
+    """Test calculate_game_pace: simple average clamped to [96, 103]."""
 
     def test_average(self):
         assert calculate_game_pace(100.0, 98.0) == 99.0
@@ -176,8 +176,9 @@ class TestCalculateGamePace:
     def test_equal(self):
         assert calculate_game_pace(100.0, 100.0) == 100.0
 
-    def test_high_paces(self):
-        assert calculate_game_pace(110.0, 108.0) == 109.0
+    def test_high_paces_clamped(self):
+        # (110 + 108) / 2 = 109 → clamped to 103
+        assert calculate_game_pace(110.0, 108.0) == 103.0
 
 
 class TestCalculatePPP:
@@ -245,34 +246,33 @@ class TestCalculateTovRate:
         assert calculate_tov_rate(0, 100) == 0.0
 
 
-class TestPaceMatchupAdjustment:
-    """Test calculate_game_pace with league_avg_pace for pace-matchup adjustment."""
+class TestPaceClamping:
+    """Test calculate_game_pace clamping to [96, 103]."""
 
-    def test_no_adjustment_when_equal_to_league_avg(self):
-        """When both teams are at league average, no adjustment."""
-        result = calculate_game_pace(99.0, 99.0, league_avg_pace=99.0)
+    def test_normal_pace_no_clamp(self):
+        """Pace within range is unchanged."""
+        result = calculate_game_pace(99.0, 99.0)
         assert result == 99.0
 
-    def test_fast_teams_amplified(self):
-        """Fast teams should get pace amplified above simple average."""
-        simple = calculate_game_pace(110.0, 108.0)
-        adjusted = calculate_game_pace(110.0, 108.0, league_avg_pace=99.0)
-        assert adjusted > simple
+    def test_high_pace_clamped_to_103(self):
+        """Fast teams get clamped to 103."""
+        result = calculate_game_pace(110.0, 108.0)
+        assert result == 103.0
 
-    def test_slow_teams_reduced(self):
-        """Slow teams should get pace reduced below simple average."""
-        simple = calculate_game_pace(88.0, 90.0)
-        adjusted = calculate_game_pace(88.0, 90.0, league_avg_pace=99.0)
-        assert adjusted < simple
+    def test_low_pace_clamped_to_96(self):
+        """Slow teams get clamped to 96."""
+        result = calculate_game_pace(88.0, 90.0)
+        assert result == 96.0
 
-    def test_known_value(self):
-        """110 + 108 → avg=109, adjustment=0.3*(110-99)+0.3*(108-99)=3.3+2.7=6.0."""
-        result = calculate_game_pace(110.0, 108.0, league_avg_pace=99.0)
-        assert abs(result - 115.0) < 0.01
+    def test_boundary_96(self):
+        """Pace exactly at 96 stays at 96."""
+        result = calculate_game_pace(96.0, 96.0)
+        assert result == 96.0
 
-    def test_backward_compatible_without_league_avg(self):
-        """Without league_avg_pace, returns simple average."""
-        assert calculate_game_pace(100.0, 98.0) == 99.0
+    def test_boundary_103(self):
+        """Pace exactly at 103 stays at 103."""
+        result = calculate_game_pace(103.0, 103.0)
+        assert result == 103.0
 
 
 # ---------- API client: new endpoints ----------

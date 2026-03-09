@@ -676,7 +676,7 @@ class TestEfficiencyAdjustment:
         adj_high_3p = ppp + 0.45 * 0.05
         assert adj_high_3p > adj_low_3p
 
-    def test_possession_model_predicted_total(self):
+    def test_predicted_total_with_safety_limits(self):
         """Predicted total = game_pace * (clamped adj_home_ppp + clamped adj_away_ppp), clamped to [205, 245]."""
         from app.prediction_engine import (
             LEAGUE_AVG_THREE_POINT_RATE, LEAGUE_AVG_FREE_THROW_RATE,

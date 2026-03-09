@@ -12,7 +12,7 @@ MAX_TOTAL_STD = 11
 # Z-score for 90% confidence interval (5th–95th percentile)
 Z_SCORE_90PCT = 1.65
 # Minimum absolute edge (points) required to recommend a game
-MIN_RECOMMEND_EDGE = 6
+MIN_RECOMMEND_EDGE = 4
 
 
 # Simulation noise parameters

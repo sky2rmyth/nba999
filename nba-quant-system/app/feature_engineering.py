@@ -159,14 +159,16 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     est_possessions = max(est_possessions, 1)
     pace = est_possessions
 
-    feat[f"{prefix}_off_rating"] = offensive_rating(avg_score, est_possessions)
+    off_rtg = offensive_rating(avg_score, est_possessions)
+    # Clamp off_rating to reasonable NBA range [105, 120]
+    if off_rtg < 105:
+        off_rtg = 105
+    if off_rtg > 120:
+        off_rtg = 120
+    feat[f"{prefix}_off_rating"] = off_rtg
     feat[f"{prefix}_def_rating"] = defensive_rating(avg_allowed, est_possessions)
     feat[f"{prefix}_net_rating"] = feat[f"{prefix}_off_rating"] - feat[f"{prefix}_def_rating"]
     feat[f"{prefix}_pace"] = pace
-
-    off_rtg = feat[f"{prefix}_off_rating"]
-    if off_rtg < 105 or off_rtg > 125:
-        logger.warning("OFF RATING OUT OF RANGE: %s off_rating=%.1f", prefix, off_rtg)
 
     # Last 5 games
     last5 = games[:5] if len(games) >= 5 else games

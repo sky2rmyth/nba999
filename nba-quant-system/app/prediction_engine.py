@@ -55,6 +55,9 @@ INJURY_RATING_FACTOR = 0.96
 # Monte Carlo simulation standard deviation for total
 MC_TOTAL_STD = 8.5
 
+# League average total for bias calibration
+LEAGUE_AVG_TOTAL = 229
+
 ICON_CORE = "⭐"
 ICON_RECOMMEND = "✅"
 ICON_NO = "❌"
@@ -351,6 +354,10 @@ def run_prediction(target_date: str | None = None) -> None:
         # Base predicted total from possession model
         predicted_total = game_pace * (home_ppp + away_ppp)
 
+        # League scoring environment calibration
+        bias_adjustment = LEAGUE_AVG_TOTAL - predicted_total
+        predicted_total += bias_adjustment * 0.25
+
         print("Predicted Total:", predicted_total)
         if predicted_total > 260:
             print("WARNING: Predicted total extremely high")
@@ -489,9 +496,9 @@ def run_prediction(target_date: str | None = None) -> None:
         )
 
         # --- Recommendation reason (based on abs_edge) ---
-        if abs_edge >= 8:
+        if abs_edge >= 7:
             reason = "模型预测与盘口差距较大"
-        elif abs_edge >= 6:
+        elif abs_edge >= 4:
             reason = "模型预测存在明显价值"
         else:
             reason = "信号较弱，不推荐"
@@ -579,8 +586,9 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
     # --- Daily recommendation ---
-    # Quality filter: abs(edge) >= 5 AND prob >= 0.60 → recommended.
-    # Star pick: abs(edge) >= 8 AND prob >= 0.65.
+    # Edge-only filter: abs(edge) < 4 → not recommended.
+    # abs(edge) >= 4 and < 7 → recommended.
+    # abs(edge) >= 7 → star_pick.
     # Min recommendations based on game count; auto-fill if needed.
     # Guaranteed 1 core (star) pick per day.
     # Cap at 5 recommendations.
@@ -599,12 +607,11 @@ def run_prediction(target_date: str | None = None) -> None:
 
         for gr in sorted_results:
             abs_edge_val = abs(gr["total_edge_pts"])
-            prob = max(gr["over_probability"], gr["under_probability"])
-            if abs_edge_val >= 5 and prob >= 0.60:
+            if abs_edge_val >= 4:
                 gr["recommended"] = True
             else:
                 gr["recommended"] = False
-            if abs_edge_val >= 8 and prob >= 0.65:
+            if abs_edge_val >= 7:
                 gr["star_pick"] = True
             else:
                 gr["star_pick"] = False

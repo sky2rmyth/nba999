@@ -16,7 +16,7 @@ from .feature_engineering import (
     calculate_three_point_rate, calculate_free_throw_rate,
     calculate_orb_rate, calculate_tov_rate,
 )
-from .game_simulator import run_possession_simulation, LEAGUE_AVG_PACE
+from .game_simulator import run_possession_simulation
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
@@ -354,32 +354,33 @@ def run_prediction(target_date: str | None = None) -> None:
             away_off *= INJURY_RATING_FACTOR
             logger.info("Injury adjustment applied: %s off_rating * %.2f", vis["full_name"], INJURY_RATING_FACTOR)
 
-        # Game pace via possession model helper (with pace-matchup adjustment)
-        game_pace = calculate_game_pace(home_pace_blend, away_pace_blend, LEAGUE_AVG_PACE)
+        # Game pace via possession model helper (with clamping to [96, 103])
+        game_pace = calculate_game_pace(home_pace_blend, away_pace_blend)
 
         # PPP derived from (possibly injury-adjusted) off_rating
         home_ppp = calculate_ppp(home_off)
         away_ppp = calculate_ppp(away_off)
 
-        # Efficiency adjustment: apply league-average structure factors
-        home_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
-        home_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
-        home_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
-        home_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
+        # Efficiency adjustment: linear structure factors
+        home_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
+        home_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
+        home_ppp += LEAGUE_AVG_ORB_RATE * 0.03
+        home_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
 
-        away_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
-        away_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
-        away_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
-        away_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
+        away_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
+        away_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
+        away_ppp += LEAGUE_AVG_ORB_RATE * 0.03
+        away_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
+
+        # PPP safety limits
+        home_ppp = max(1.05, min(home_ppp, 1.15))
+        away_ppp = max(1.05, min(away_ppp, 1.15))
 
         # Final predicted total from possession model
         predicted_total = game_pace * (home_ppp + away_ppp)
 
-        print("Predicted Total:", predicted_total)
-        if predicted_total > 260:
-            print("WARNING: Predicted total extremely high")
-        if predicted_total < 180:
-            print("WARNING: Predicted total extremely low")
+        # Total safety limits
+        predicted_total = max(205, min(predicted_total, 245))
 
         # Keep ML-based margin for spread analysis
         predicted_margin = predicted_home_score - predicted_away_score

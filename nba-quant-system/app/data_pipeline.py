@@ -83,6 +83,32 @@ def fetch_player_injuries() -> list[dict]:
     return client.injuries(per_page=100)
 
 
+def fetch_game_advanced_stats(game_id: int) -> dict:
+    """Fetch game advanced stats from the balldontlie GOAT endpoint.
+
+    Returns a dict with off_rating, def_rating, pace, ts_pct, efg_pct,
+    ast_pct, reb_pct, tov_pct for the given game.
+    """
+    client = BallDontLieClient()
+    data = client.game_advanced_stats(**{"game_ids[]": [game_id], "per_page": 100})
+
+    stats: dict = {}
+    for entry in data:
+        team_id = entry.get("team_id")
+        if team_id is not None:
+            stats[team_id] = {
+                "off_rating": entry.get("off_rating"),
+                "def_rating": entry.get("def_rating"),
+                "pace": entry.get("pace"),
+                "ts_pct": entry.get("ts_pct"),
+                "efg_pct": entry.get("efg_pct"),
+                "ast_pct": entry.get("ast_pct"),
+                "reb_pct": entry.get("reb_pct"),
+                "tov_pct": entry.get("tov_pct"),
+            }
+    return stats
+
+
 def _try_send_telegram(text: str) -> None:
     """Send Telegram message, silently ignore failures."""
     try:

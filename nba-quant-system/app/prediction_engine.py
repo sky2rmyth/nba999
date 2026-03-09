@@ -343,8 +343,8 @@ def run_prediction(target_date: str | None = None) -> None:
         home_def = RECENT_WEIGHT * last10_home_def + SEASON_WEIGHT * season_home_def
         away_def = RECENT_WEIGHT * last10_away_def + SEASON_WEIGHT * season_away_def
 
-        home_pace_blend = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
-        away_pace_blend = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
+        home_pace_blend = 0.7 * last10_home_pace + 0.3 * season_home_pace
+        away_pace_blend = 0.7 * last10_away_pace + 0.3 * season_away_pace
 
         # Injury adjustment: reduce off_rating when team has player(s) ruled out
         if home["id"] in teams_with_star_out:
@@ -354,33 +354,19 @@ def run_prediction(target_date: str | None = None) -> None:
             away_off *= INJURY_RATING_FACTOR
             logger.info("Injury adjustment applied: %s off_rating * %.2f", vis["full_name"], INJURY_RATING_FACTOR)
 
-        # Game pace via possession model helper (with clamping to [97, 101])
+        # Game pace via matchup pace formula (0.55 * fast + 0.45 * slow)
         game_pace = calculate_game_pace(home_pace_blend, away_pace_blend)
 
         # PPP derived from (possibly injury-adjusted) off_rating
         home_ppp = calculate_ppp(home_off)
         away_ppp = calculate_ppp(away_off)
 
-        # Efficiency adjustment: linear structure factors
-        home_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
-        home_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
-        home_ppp += LEAGUE_AVG_ORB_RATE * 0.03
-        home_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
-
-        away_ppp += LEAGUE_AVG_THREE_POINT_RATE * 0.05
-        away_ppp += LEAGUE_AVG_FREE_THROW_RATE * 0.04
-        away_ppp += LEAGUE_AVG_ORB_RATE * 0.03
-        away_ppp -= LEAGUE_AVG_TOV_RATE * 0.05
-
         # PPP safety limits
-        home_ppp = max(1.05, min(home_ppp, 1.15))
-        away_ppp = max(1.05, min(away_ppp, 1.15))
+        home_ppp = max(1.03, min(home_ppp, 1.18))
+        away_ppp = max(1.03, min(away_ppp, 1.18))
 
         # Final predicted total from possession model (before market anchor)
         model_total = game_pace * (home_ppp + away_ppp)
-
-        # Total safety limits on model total
-        model_total = max(205, min(model_total, 245))
 
         # Keep ML-based margin for spread analysis
         predicted_margin = predicted_home_score - predicted_away_score
@@ -395,7 +381,6 @@ def run_prediction(target_date: str | None = None) -> None:
 
         # --- Market Anchor: blend model total with closing line ---
         predicted_total = 0.65 * model_total + 0.35 * live_total
-        predicted_total = max(205, min(predicted_total, 245))
 
         # --- Debug output ---
         total_edge_debug = predicted_total - live_total
@@ -620,9 +605,9 @@ def run_prediction(target_date: str | None = None) -> None:
 
         # Determine minimum recommendations based on game count
         total_games = len(sorted_results)
-        if total_games > 5:
+        if total_games >= 5:
             min_recommend = 4
-        elif total_games >= 3:
+        elif total_games == 4:
             min_recommend = 3
         else:
             min_recommend = 1

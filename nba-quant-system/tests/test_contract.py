@@ -185,13 +185,13 @@ class TestMonteCarlo:
         result = self._make_sim(game_id=55555, predicted_total=225.0, closing_total=220.0)
         assert abs(result["edge"] - 5.0) < 0.01
 
-    def test_recommend_true_when_edge_ge_6(self):
-        """recommend should be True when abs_edge >= 6."""
-        result = self._make_sim(predicted_total=226.0, closing_total=220.0)
+    def test_recommend_true_when_edge_ge_4(self):
+        """recommend should be True when abs_edge >= 4."""
+        result = self._make_sim(predicted_total=224.0, closing_total=220.0)
         assert result["recommend"] is True
 
-    def test_recommend_false_when_edge_lt_6(self):
-        """recommend should be False when abs_edge < 6."""
+    def test_recommend_false_when_edge_lt_4(self):
+        """recommend should be False when abs_edge < 4."""
         result = self._make_sim(predicted_total=222.0, closing_total=220.0)
         assert result["recommend"] is False
 

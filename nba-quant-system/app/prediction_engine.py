@@ -10,8 +10,8 @@ import pandas as pd
 from .api_client import BallDontLieClient
 from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
-from .data_pipeline import bootstrap_historical_data, sync_date_games
-from .feature_engineering import FEATURE_COLUMNS, _compute_team_features
+from .data_pipeline import bootstrap_historical_data, sync_date_games, fetch_player_injuries
+from .feature_engineering import FEATURE_COLUMNS, _compute_team_features, calculate_game_pace, calculate_ppp
 from .game_simulator import run_possession_simulation
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
@@ -48,6 +48,12 @@ MIN_PACE_DIVISOR = 80
 PROB_RAW_WEIGHT = 0.7
 PROB_NEUTRAL_WEIGHT = 0.3
 NEUTRAL_PROBABILITY = 0.5
+
+# Injury adjustment: reduce offensive rating when a star player is out
+INJURY_RATING_FACTOR = 0.96
+
+# Monte Carlo simulation standard deviation for total
+MC_TOTAL_STD = 8.5
 
 ICON_CORE = "⭐"
 ICON_RECOMMEND = "✅"
@@ -217,6 +223,23 @@ def run_prediction(target_date: str | None = None) -> None:
     telegram_count = 0
     game_results: list[dict] = []  # Collect per-game data for core pick selection
 
+    # --- Fetch player injuries for adjustment ---
+    try:
+        injury_list = fetch_player_injuries()
+    except Exception:
+        logger.warning("Could not fetch player injuries — skipping injury adjustment")
+        injury_list = []
+
+    # Build a set of team_ids that have injured players marked as "out"
+    teams_with_star_out: set[int] = set()
+    for inj in injury_list:
+        status = str(inj.get("status", "")).lower()
+        if status == "out":
+            team = inj.get("team", {})
+            team_id = team.get("id") if isinstance(team, dict) else None
+            if team_id is not None:
+                teams_with_star_out.add(int(team_id))
+
     for idx, g in enumerate(games):
         game_id = g["id"]
         home = g["home_team"]
@@ -310,40 +333,20 @@ def run_prediction(target_date: str | None = None) -> None:
         home_pace_blend = RECENT_WEIGHT * last10_home_pace + SEASON_WEIGHT * season_home_pace
         away_pace_blend = RECENT_WEIGHT * last10_away_pace + SEASON_WEIGHT * season_away_pace
 
-        # Game pace: simple average clamped to [94, 104]
-        game_pace = (home_pace_blend + away_pace_blend) / 2.0
-        game_pace = max(94.0, min(104.0, game_pace))
+        # Injury adjustment: reduce off_rating when team has player(s) ruled out
+        if home["id"] in teams_with_star_out:
+            home_off *= INJURY_RATING_FACTOR
+            logger.info("Injury adjustment applied: %s off_rating * %.2f", home["full_name"], INJURY_RATING_FACTOR)
+        if vis["id"] in teams_with_star_out:
+            away_off *= INJURY_RATING_FACTOR
+            logger.info("Injury adjustment applied: %s off_rating * %.2f", vis["full_name"], INJURY_RATING_FACTOR)
 
-        if game_pace > 120:
-            print("WARNING: Pace too high:", game_pace)
-        if game_pace < 80:
-            print("WARNING: Pace too low:", game_pace)
+        # Game pace via possession model helper
+        game_pace = calculate_game_pace(home_pace_blend, away_pace_blend)
 
-        # Possession model: PPP derived directly from off_rating.
-        # off_rating already embeds offensive efficiency (3P / FT / ORB);
-        # no additional multiplicative adjustment is applied to avoid
-        # double-counting which inflates Predicted Total above 250.
-        home_ppp = home_off / 100.0
-        away_ppp = away_off / 100.0
-
-        if home_ppp > 1.5:
-            print("WARNING: Home PPP abnormal:", home_ppp)
-        if away_ppp > 1.5:
-            print("WARNING: Away PPP abnormal:", away_ppp)
-
-        print("====== MODEL DEBUG ======")
-        print("Home Team:", home["full_name"])
-        print("Away Team:", vis["full_name"])
-        print("Home Pace:", home_pace_blend)
-        print("Away Pace:", away_pace_blend)
-        print("Game Pace:", game_pace)
-        print("Home Off Rating:", home_off)
-        print("Away Off Rating:", away_off)
-        print("Home Def Rating:", home_def)
-        print("Away Def Rating:", away_def)
-        print("Home PPP:", home_ppp)
-        print("Away PPP:", away_ppp)
-        print("=========================")
+        # PPP derived from (possibly injury-adjusted) off_rating
+        home_ppp = calculate_ppp(home_off)
+        away_ppp = calculate_ppp(away_off)
 
         # Base predicted total from possession model
         predicted_total = game_pace * (home_ppp + away_ppp)
@@ -365,7 +368,16 @@ def run_prediction(target_date: str | None = None) -> None:
             logger.warning("Odds Source: NONE (game %s) – skipping game (no line available)", game_id)
             continue
 
-        print("Closing Total Line:", live_total)
+        # --- Debug output ---
+        total_edge_debug = predicted_total - live_total
+        print("====== MODEL DEBUG ======")
+        print("Game Pace:", game_pace)
+        print("Home PPP:", home_ppp)
+        print("Away PPP:", away_ppp)
+        print("Predicted Total:", predicted_total)
+        print("Closing Line:", live_total)
+        print("Edge:", total_edge_debug)
+        print("=========================")
 
         # --- Hybrid: Spread Cover & Total model predictions ---
         spread_cover_prob_model = None
@@ -393,6 +405,7 @@ def run_prediction(target_date: str | None = None) -> None:
             closing_total=live_total,
             spread_line=live_spread,
             n_sim=MIN_SIMULATION_COUNT,
+            total_std=MC_TOTAL_STD,
         )
 
         print("Simulation Low:", sim["simulation_low"])

@@ -596,27 +596,23 @@ class TestLeagueConstants:
 
 
 class TestGamePaceCalculation:
-    """Test game pace is simple average clamped to [94, 104]."""
-
-    @staticmethod
-    def _calc_pace(home_pace, away_pace):
-        pace = (home_pace + away_pace) / 2.0
-        return max(94.0, min(104.0, pace))
+    """Test game pace is simple average of home and away pace (no clamping)."""
 
     def test_normal_pace(self):
-        assert self._calc_pace(100.0, 98.0) == 99.0
+        from app.feature_engineering import calculate_game_pace
+        assert calculate_game_pace(100.0, 98.0) == 99.0
 
-    def test_clamp_high(self):
-        assert self._calc_pace(110.0, 108.0) == 104.0
+    def test_high_pace(self):
+        from app.feature_engineering import calculate_game_pace
+        assert calculate_game_pace(110.0, 108.0) == 109.0
 
-    def test_clamp_low(self):
-        assert self._calc_pace(88.0, 90.0) == 94.0
+    def test_low_pace(self):
+        from app.feature_engineering import calculate_game_pace
+        assert calculate_game_pace(88.0, 90.0) == 89.0
 
-    def test_boundary_104(self):
-        assert self._calc_pace(104.0, 104.0) == 104.0
-
-    def test_boundary_94(self):
-        assert self._calc_pace(94.0, 94.0) == 94.0
+    def test_equal_pace(self):
+        from app.feature_engineering import calculate_game_pace
+        assert calculate_game_pace(100.0, 100.0) == 100.0
 
 
 class TestPPPNoStructureAmplification:
@@ -624,23 +620,22 @@ class TestPPPNoStructureAmplification:
 
     def test_ppp_equals_off_rating_div_100(self):
         """PPP must be derived directly from off_rating / 100 with no multiplier."""
-        home_off = 112.0
-        away_off = 108.0
-        home_ppp = home_off / 100.0
-        away_ppp = away_off / 100.0
-        assert home_ppp == 1.12
-        assert away_ppp == 1.08
+        from app.feature_engineering import calculate_ppp
+        assert calculate_ppp(112.0) == 1.12
+        assert calculate_ppp(108.0) == 1.08
 
     def test_ppp_within_normal_range(self):
         """Realistic off_rating values produce PPP in [1.0, 1.2]."""
+        from app.feature_engineering import calculate_ppp
         for off_rating in [105.0, 110.0, 114.0, 115.0]:
-            ppp = off_rating / 100.0
+            ppp = calculate_ppp(off_rating)
             assert 1.0 <= ppp <= 1.2, f"PPP {ppp} out of range for off_rating {off_rating}"
 
     def test_predicted_total_in_range(self):
         """With realistic PPP and pace, predicted total stays in 210-240."""
-        game_pace = 99.0
-        home_ppp = 1.12
-        away_ppp = 1.10
+        from app.feature_engineering import calculate_game_pace, calculate_ppp
+        game_pace = calculate_game_pace(99.0, 99.0)
+        home_ppp = calculate_ppp(112.0)
+        away_ppp = calculate_ppp(110.0)
         predicted_total = game_pace * (home_ppp + away_ppp)
         assert 210 <= predicted_total <= 240

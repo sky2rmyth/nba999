@@ -9,6 +9,11 @@ from app.data_pipeline import (
     offensive_rating,
     defensive_rating,
 )
+from app.feature_engineering import (
+    calculate_possessions_from_boxscore,
+    calculate_game_pace,
+    calculate_ppp,
+)
 
 
 class TestCalculatePossessions:
@@ -129,3 +134,54 @@ class TestPossessionBasedMetrics:
         pace = (calculate_pace(home_stats) + calculate_pace(away_stats)) / 2.0
         predicted_total = pace * (home_off / 100 + away_off / 100)
         assert 210 <= predicted_total <= 240
+
+
+class TestCalculatePossessionsFromBoxscore:
+    """Test calculate_possessions_from_boxscore: FGA - OREB + TOV + 0.44 * FTA."""
+
+    def test_typical_boxscore(self):
+        bs = {"fga": 88, "oreb": 10, "turnovers": 14, "fta": 22}
+        poss = calculate_possessions_from_boxscore(bs)
+        # 88 - 10 + 14 + 0.44*22 = 88 - 10 + 14 + 9.68 = 101.68
+        assert abs(poss - 101.68) < 0.01
+
+    def test_empty_boxscore_returns_minimum(self):
+        poss = calculate_possessions_from_boxscore({})
+        assert poss == 1
+
+    def test_high_scoring_boxscore(self):
+        bs = {"fga": 95, "oreb": 12, "turnovers": 16, "fta": 30}
+        poss = calculate_possessions_from_boxscore(bs)
+        # 95 - 12 + 16 + 0.44*30 = 95 - 12 + 16 + 13.2 = 112.2
+        assert abs(poss - 112.2) < 0.01
+
+    def test_never_below_one(self):
+        bs = {"fga": 0, "oreb": 100, "turnovers": 0, "fta": 0}
+        poss = calculate_possessions_from_boxscore(bs)
+        assert poss == 1
+
+
+class TestCalculateGamePace:
+    """Test calculate_game_pace: simple average of home and away pace."""
+
+    def test_average(self):
+        assert calculate_game_pace(100.0, 98.0) == 99.0
+
+    def test_equal(self):
+        assert calculate_game_pace(100.0, 100.0) == 100.0
+
+    def test_high_paces(self):
+        assert calculate_game_pace(110.0, 108.0) == 109.0
+
+
+class TestCalculatePPP:
+    """Test calculate_ppp: off_rating / 100."""
+
+    def test_typical(self):
+        assert calculate_ppp(112.0) == 1.12
+
+    def test_low(self):
+        assert calculate_ppp(100.0) == 1.0
+
+    def test_high(self):
+        assert calculate_ppp(120.0) == 1.2

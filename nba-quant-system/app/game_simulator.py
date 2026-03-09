@@ -29,6 +29,7 @@ def run_possession_simulation(
     closing_total: float,
     spread_line: float,
     n_sim: int = 10000,
+    total_std: float = 8.5,
 ) -> dict[str, float]:
     seed = int(game_id) % 1_000_000
     rng = np.random.default_rng(seed)
@@ -40,13 +41,12 @@ def run_possession_simulation(
     home_scores = pace_sims * home_ppp_sims
     away_scores = pace_sims * away_ppp_sims
 
-    totals = home_scores + away_scores
+    # Total distribution centred on predicted_total with caller-supplied std
+    totals = rng.normal(predicted_total, total_std, n_sim)
     margins = home_scores - away_scores
 
     # Standard deviation capped at MAX_TOTAL_STD
-    total_std = float(np.std(totals))
-    if total_std > MAX_TOTAL_STD:
-        total_std = MAX_TOTAL_STD
+    capped_total_std = min(total_std, MAX_TOTAL_STD)
 
     # Probability calculation from simulation counts
     over_probability = float(np.mean(totals > closing_total))
@@ -60,8 +60,8 @@ def run_possession_simulation(
     recommend = abs_edge >= MIN_RECOMMEND_EDGE
 
     # Parametric interval based on capped total_std
-    total_5pct = predicted_total - Z_SCORE_90PCT * total_std
-    total_95pct = predicted_total + Z_SCORE_90PCT * total_std
+    total_5pct = predicted_total - Z_SCORE_90PCT * capped_total_std
+    total_95pct = predicted_total + Z_SCORE_90PCT * capped_total_std
 
     # Spread and margin statistics
     spread_cover_prob = float(np.mean(margins + spread_line > 0))
@@ -89,7 +89,7 @@ def run_possession_simulation(
         "expected_visitor_score": float(np.mean(away_scores)),
         "predicted_margin": margin_mean,
         "margin_std": margin_std,
-        "total_std": total_std,
+        "total_std": capped_total_std,
         "score_distribution_variance": variance,
         "simulation_count": n_sim,
         "spread_5pct": spread_5pct,

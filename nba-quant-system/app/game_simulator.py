@@ -41,7 +41,7 @@ def run_possession_simulation(
     home_scores = pace_sims * home_ppp_sims
     away_scores = pace_sims * away_ppp_sims
 
-    # Total distribution centred on predicted_total with caller-supplied std
+    # Total distribution centered on predicted_total with caller-supplied std
     totals = rng.normal(predicted_total, total_std, n_sim)
     margins = home_scores - away_scores
 

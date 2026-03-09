@@ -49,7 +49,7 @@ PROB_RAW_WEIGHT = 0.7
 PROB_NEUTRAL_WEIGHT = 0.3
 NEUTRAL_PROBABILITY = 0.5
 
-# Injury adjustment: reduce offensive rating when a star player is out
+# Injury adjustment: reduce offensive rating when a team has player(s) ruled out
 INJURY_RATING_FACTOR = 0.96
 
 # Monte Carlo simulation standard deviation for total

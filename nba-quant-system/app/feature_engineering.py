@@ -32,7 +32,7 @@ def calculate_possessions_from_boxscore(boxscore: dict) -> float:
     tov = boxscore.get("turnovers", 0)
     fta = boxscore.get("fta", 0)
 
-    poss = fga - orb + tov + 0.44 * fta
+    poss = fga - orb + tov + 0.44 * fta  # 0.44 = FT possession factor
     return max(poss, 1)
 
 

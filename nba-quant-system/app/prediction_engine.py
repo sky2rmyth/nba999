@@ -354,7 +354,7 @@ def run_prediction(target_date: str | None = None) -> None:
             away_off *= INJURY_RATING_FACTOR
             logger.info("Injury adjustment applied: %s off_rating * %.2f", vis["full_name"], INJURY_RATING_FACTOR)
 
-        # Game pace via possession model helper (with clamping to [96, 103])
+        # Game pace via possession model helper (with clamping to [97, 101])
         game_pace = calculate_game_pace(home_pace_blend, away_pace_blend)
 
         # PPP derived from (possibly injury-adjusted) off_rating
@@ -376,22 +376,26 @@ def run_prediction(target_date: str | None = None) -> None:
         home_ppp = max(1.05, min(home_ppp, 1.15))
         away_ppp = max(1.05, min(away_ppp, 1.15))
 
-        # Final predicted total from possession model
-        predicted_total = game_pace * (home_ppp + away_ppp)
+        # Final predicted total from possession model (before market anchor)
+        model_total = game_pace * (home_ppp + away_ppp)
 
-        # Total safety limits
-        predicted_total = max(205, min(predicted_total, 245))
+        # Total safety limits on model total
+        model_total = max(205, min(model_total, 245))
 
         # Keep ML-based margin for spread analysis
         predicted_margin = predicted_home_score - predicted_away_score
 
         logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
-        logger.info("Predicted Margin: %.1f  Total: %.1f", predicted_margin, predicted_total)
+        logger.info("Predicted Margin: %.1f  Model Total: %.1f", predicted_margin, model_total)
 
         # --- Skip games without valid odds ---
         if odds_source == "NONE":
             logger.warning("Odds Source: NONE (game %s) – skipping game (no line available)", game_id)
             continue
+
+        # --- Market Anchor: blend model total with closing line ---
+        predicted_total = 0.65 * model_total + 0.35 * live_total
+        predicted_total = max(205, min(predicted_total, 245))
 
         # --- Debug output ---
         total_edge_debug = predicted_total - live_total

@@ -15,6 +15,10 @@ from app.feature_engineering import (
     calculate_possessions_from_boxscore,
     calculate_game_pace,
     calculate_ppp,
+    calculate_three_point_rate,
+    calculate_free_throw_rate,
+    calculate_orb_rate,
+    calculate_tov_rate,
 )
 
 
@@ -187,6 +191,88 @@ class TestCalculatePPP:
 
     def test_high(self):
         assert calculate_ppp(120.0) == 1.2
+
+
+class TestCalculateThreePointRate:
+    """Test calculate_three_point_rate: three_pa / fga."""
+
+    def test_typical(self):
+        assert abs(calculate_three_point_rate(33, 88) - 0.375) < 0.001
+
+    def test_zero_fga(self):
+        assert calculate_three_point_rate(10, 0) == 0.0
+
+    def test_zero_three_pa(self):
+        assert calculate_three_point_rate(0, 88) == 0.0
+
+
+class TestCalculateFreeThrowRate:
+    """Test calculate_free_throw_rate: fta / fga."""
+
+    def test_typical(self):
+        assert abs(calculate_free_throw_rate(22, 88) - 0.25) < 0.001
+
+    def test_zero_fga(self):
+        assert calculate_free_throw_rate(10, 0) == 0.0
+
+    def test_zero_fta(self):
+        assert calculate_free_throw_rate(0, 88) == 0.0
+
+
+class TestCalculateOrbRate:
+    """Test calculate_orb_rate: oreb / (oreb + opp_dreb)."""
+
+    def test_typical(self):
+        assert abs(calculate_orb_rate(10, 30) - 0.25) < 0.001
+
+    def test_zero_total(self):
+        assert calculate_orb_rate(0, 0) == 0.0
+
+    def test_all_offensive(self):
+        assert abs(calculate_orb_rate(10, 0) - 1.0) < 0.001
+
+
+class TestCalculateTovRate:
+    """Test calculate_tov_rate: turnovers / possessions."""
+
+    def test_typical(self):
+        assert abs(calculate_tov_rate(14, 100) - 0.14) < 0.001
+
+    def test_zero_possessions(self):
+        assert calculate_tov_rate(10, 0) == 0.0
+
+    def test_zero_turnovers(self):
+        assert calculate_tov_rate(0, 100) == 0.0
+
+
+class TestPaceMatchupAdjustment:
+    """Test calculate_game_pace with league_avg_pace for pace-matchup adjustment."""
+
+    def test_no_adjustment_when_equal_to_league_avg(self):
+        """When both teams are at league average, no adjustment."""
+        result = calculate_game_pace(99.0, 99.0, league_avg_pace=99.0)
+        assert result == 99.0
+
+    def test_fast_teams_amplified(self):
+        """Fast teams should get pace amplified above simple average."""
+        simple = calculate_game_pace(110.0, 108.0)
+        adjusted = calculate_game_pace(110.0, 108.0, league_avg_pace=99.0)
+        assert adjusted > simple
+
+    def test_slow_teams_reduced(self):
+        """Slow teams should get pace reduced below simple average."""
+        simple = calculate_game_pace(88.0, 90.0)
+        adjusted = calculate_game_pace(88.0, 90.0, league_avg_pace=99.0)
+        assert adjusted < simple
+
+    def test_known_value(self):
+        """110 + 108 → avg=109, adjustment=0.3*(110-99)+0.3*(108-99)=3.3+2.7=6.0."""
+        result = calculate_game_pace(110.0, 108.0, league_avg_pace=99.0)
+        assert abs(result - 115.0) < 0.01
+
+    def test_backward_compatible_without_league_avg(self):
+        """Without league_avg_pace, returns simple average."""
+        assert calculate_game_pace(100.0, 98.0) == 99.0
 
 
 # ---------- API client: new endpoints ----------

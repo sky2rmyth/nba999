@@ -36,14 +36,53 @@ def calculate_possessions_from_boxscore(boxscore: dict) -> float:
     return max(poss, 1)
 
 
-def calculate_game_pace(home_pace: float, away_pace: float) -> float:
-    """Calculate expected game pace as the simple average of both teams."""
-    return (home_pace + away_pace) / 2
+def calculate_game_pace(home_pace: float, away_pace: float,
+                        league_avg_pace: float | None = None) -> float:
+    """Calculate expected game pace.
+
+    When *league_avg_pace* is provided the pace-matchup adjustment is applied:
+    deviations from the league average are amplified by 30 %.
+    """
+    game_pace = (home_pace + away_pace) / 2
+    if league_avg_pace is not None:
+        pace_adjustment = (home_pace - league_avg_pace) * 0.3
+        pace_adjustment += (away_pace - league_avg_pace) * 0.3
+        game_pace += pace_adjustment
+    return game_pace
 
 
 def calculate_ppp(off_rating: float) -> float:
     """Convert offensive rating to Points Per Possession."""
     return off_rating / 100
+
+
+def calculate_three_point_rate(three_pa: float, fga: float) -> float:
+    """Three-point attempt rate: 3PA / FGA."""
+    if fga <= 0:
+        return 0.0
+    return three_pa / fga
+
+
+def calculate_free_throw_rate(fta: float, fga: float) -> float:
+    """Free-throw attempt rate: FTA / FGA."""
+    if fga <= 0:
+        return 0.0
+    return fta / fga
+
+
+def calculate_orb_rate(oreb: float, opp_dreb: float) -> float:
+    """Offensive rebound rate: OREB / (OREB + OPP_DREB)."""
+    total = oreb + opp_dreb
+    if total <= 0:
+        return 0.0
+    return oreb / total
+
+
+def calculate_tov_rate(turnovers: float, possessions: float) -> float:
+    """Turnover rate: turnovers / possessions."""
+    if possessions <= 0:
+        return 0.0
+    return turnovers / possessions
 
 
 FEATURE_COLUMNS = [

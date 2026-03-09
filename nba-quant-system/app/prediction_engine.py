@@ -354,7 +354,8 @@ def run_prediction(target_date: str | None = None) -> None:
         # Base predicted total from possession model
         predicted_total = game_pace * (home_ppp + away_ppp)
 
-        # League scoring environment calibration
+        # League scoring environment calibration: pull predicted total 25% toward
+        # the league average to correct systematic over/under-estimation.
         bias_adjustment = LEAGUE_AVG_TOTAL - predicted_total
         predicted_total += bias_adjustment * 0.25
 

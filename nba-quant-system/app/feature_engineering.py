@@ -161,10 +161,7 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
 
     off_rtg = offensive_rating(avg_score, est_possessions)
     # Clamp off_rating to reasonable NBA range [105, 120]
-    if off_rtg < 105:
-        off_rtg = 105
-    if off_rtg > 120:
-        off_rtg = 120
+    off_rtg = max(105, min(off_rtg, 120))
     feat[f"{prefix}_off_rating"] = off_rtg
     feat[f"{prefix}_def_rating"] = defensive_rating(avg_allowed, est_possessions)
     feat[f"{prefix}_net_rating"] = feat[f"{prefix}_off_rating"] - feat[f"{prefix}_def_rating"]

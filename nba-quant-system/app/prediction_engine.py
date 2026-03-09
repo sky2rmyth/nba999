@@ -11,8 +11,12 @@ from .api_client import BallDontLieClient
 from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games, fetch_player_injuries
-from .feature_engineering import FEATURE_COLUMNS, _compute_team_features, calculate_game_pace, calculate_ppp
-from .game_simulator import run_possession_simulation
+from .feature_engineering import (
+    FEATURE_COLUMNS, _compute_team_features, calculate_game_pace, calculate_ppp,
+    calculate_three_point_rate, calculate_free_throw_rate,
+    calculate_orb_rate, calculate_tov_rate,
+)
+from .game_simulator import run_possession_simulation, LEAGUE_AVG_PACE
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
 from .prediction_models import MODEL_DIR, MODEL_FILES
@@ -57,6 +61,12 @@ MC_TOTAL_STD = 8.5
 
 # League average total for bias calibration
 LEAGUE_AVG_TOTAL = 229
+
+# League-average rate constants for possession-based efficiency adjustment
+LEAGUE_AVG_THREE_POINT_RATE = 0.37
+LEAGUE_AVG_FREE_THROW_RATE = 0.27
+LEAGUE_AVG_ORB_RATE = 0.25
+LEAGUE_AVG_TOV_RATE = 0.13
 
 ICON_CORE = "⭐"
 ICON_RECOMMEND = "✅"
@@ -344,20 +354,36 @@ def run_prediction(target_date: str | None = None) -> None:
             away_off *= INJURY_RATING_FACTOR
             logger.info("Injury adjustment applied: %s off_rating * %.2f", vis["full_name"], INJURY_RATING_FACTOR)
 
-        # Game pace via possession model helper
-        game_pace = calculate_game_pace(home_pace_blend, away_pace_blend)
+        # Game pace via possession model helper (with pace-matchup adjustment)
+        game_pace = calculate_game_pace(home_pace_blend, away_pace_blend, LEAGUE_AVG_PACE)
 
         # PPP derived from (possibly injury-adjusted) off_rating
         home_ppp = calculate_ppp(home_off)
         away_ppp = calculate_ppp(away_off)
 
-        # Base predicted total from possession model
-        predicted_total = game_pace * (home_ppp + away_ppp)
+        # Efficiency adjustment: apply league-average structure factors
+        home_three_point_rate = LEAGUE_AVG_THREE_POINT_RATE
+        home_free_throw_rate = LEAGUE_AVG_FREE_THROW_RATE
+        home_orb_rate = LEAGUE_AVG_ORB_RATE
+        home_tov_rate = LEAGUE_AVG_TOV_RATE
 
-        # League scoring environment calibration: pull predicted total 25% toward
-        # the league average to correct systematic over/under-estimation.
-        bias_adjustment = LEAGUE_AVG_TOTAL - predicted_total
-        predicted_total += bias_adjustment * 0.25
+        home_ppp *= (1 + home_three_point_rate * 0.15)
+        home_ppp *= (1 + home_free_throw_rate * 0.10)
+        home_ppp *= (1 + home_orb_rate * 0.08)
+        home_ppp *= (1 - home_tov_rate * 0.12)
+
+        away_three_point_rate = LEAGUE_AVG_THREE_POINT_RATE
+        away_free_throw_rate = LEAGUE_AVG_FREE_THROW_RATE
+        away_orb_rate = LEAGUE_AVG_ORB_RATE
+        away_tov_rate = LEAGUE_AVG_TOV_RATE
+
+        away_ppp *= (1 + away_three_point_rate * 0.15)
+        away_ppp *= (1 + away_free_throw_rate * 0.10)
+        away_ppp *= (1 + away_orb_rate * 0.08)
+        away_ppp *= (1 - away_tov_rate * 0.12)
+
+        # Final predicted total from possession model
+        predicted_total = game_pace * (home_ppp + away_ppp)
 
         print("Predicted Total:", predicted_total)
         if predicted_total > 260:

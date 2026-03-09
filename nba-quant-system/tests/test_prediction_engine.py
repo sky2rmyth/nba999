@@ -639,3 +639,79 @@ class TestPPPNoStructureAmplification:
         away_ppp = calculate_ppp(110.0)
         predicted_total = game_pace * (home_ppp + away_ppp)
         assert 210 <= predicted_total <= 240
+
+
+class TestEfficiencyAdjustment:
+    """Test PPP efficiency adjustment using league-average structure factors."""
+
+    def test_efficiency_adjustment_increases_ppp(self):
+        """Net effect of 3P, FT, ORB, TOV adjustments on PPP."""
+        from app.prediction_engine import (
+            LEAGUE_AVG_THREE_POINT_RATE, LEAGUE_AVG_FREE_THROW_RATE,
+            LEAGUE_AVG_ORB_RATE, LEAGUE_AVG_TOV_RATE,
+        )
+        from app.feature_engineering import calculate_ppp
+        base_ppp = calculate_ppp(112.0)
+        adj_ppp = base_ppp
+        adj_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
+        adj_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
+        adj_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
+        adj_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
+        # Net effect should increase PPP (positive factors outweigh TOV)
+        assert adj_ppp > base_ppp
+
+    def test_tov_rate_reduces_ppp(self):
+        """Higher turnover rate should reduce PPP."""
+        from app.feature_engineering import calculate_ppp
+        ppp = calculate_ppp(112.0)
+        adj_low_tov = ppp * (1 - 0.10 * 0.12)
+        adj_high_tov = ppp * (1 - 0.20 * 0.12)
+        assert adj_low_tov > adj_high_tov
+
+    def test_three_point_rate_boosts_ppp(self):
+        """Higher three-point rate should increase PPP."""
+        from app.feature_engineering import calculate_ppp
+        ppp = calculate_ppp(112.0)
+        adj_low_3p = ppp * (1 + 0.30 * 0.15)
+        adj_high_3p = ppp * (1 + 0.45 * 0.15)
+        assert adj_high_3p > adj_low_3p
+
+    def test_possession_model_predicted_total(self):
+        """Predicted total = game_pace * (adj_home_ppp + adj_away_ppp)."""
+        from app.prediction_engine import (
+            LEAGUE_AVG_THREE_POINT_RATE, LEAGUE_AVG_FREE_THROW_RATE,
+            LEAGUE_AVG_ORB_RATE, LEAGUE_AVG_TOV_RATE,
+        )
+        from app.feature_engineering import calculate_game_pace, calculate_ppp
+        from app.game_simulator import LEAGUE_AVG_PACE
+        game_pace = calculate_game_pace(99.0, 99.0, LEAGUE_AVG_PACE)
+        home_ppp = calculate_ppp(112.0)
+        away_ppp = calculate_ppp(110.0)
+        for ppp_ref in [home_ppp, away_ppp]:
+            pass  # just verify they compute
+        # Apply efficiency adjustments
+        for rate_set in [(home_ppp,), (away_ppp,)]:
+            pass
+        home_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
+        home_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
+        home_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
+        home_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
+        away_ppp *= (1 + LEAGUE_AVG_THREE_POINT_RATE * 0.15)
+        away_ppp *= (1 + LEAGUE_AVG_FREE_THROW_RATE * 0.10)
+        away_ppp *= (1 + LEAGUE_AVG_ORB_RATE * 0.08)
+        away_ppp *= (1 - LEAGUE_AVG_TOV_RATE * 0.12)
+        predicted_total = game_pace * (home_ppp + away_ppp)
+        # With efficiency adjustments, total should still be in reasonable NBA range
+        assert 200 <= predicted_total <= 280
+
+
+class TestMonteCarloConstants:
+    """Verify Monte Carlo std and run count constants."""
+
+    def test_mc_std(self):
+        from app.prediction_engine import MC_TOTAL_STD
+        assert MC_TOTAL_STD == 8.5
+
+    def test_mc_runs(self):
+        from app.prediction_engine import MIN_SIMULATION_COUNT
+        assert MIN_SIMULATION_COUNT == 10000

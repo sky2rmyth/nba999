@@ -527,13 +527,11 @@ def run_prediction(target_date: str | None = None) -> None:
         combined_total_prob = calibrated_total_prob
 
         # Total pick: use classifier prediction rule when available, else use model total
-        if total_prediction is not None:
-            # total_pick already set by classifier above
-            pass
-        elif predicted_total > live_total:
-            total_pick = "大分"
-        else:
-            total_pick = "小分"
+        if total_prediction is None:
+            if predicted_total > live_total:
+                total_pick = "大分"
+            else:
+                total_pick = "小分"
 
         # --- Rating from simulation edge ---
         spread_rating = compute_spread_rating(combined_spread_prob, live_spread)

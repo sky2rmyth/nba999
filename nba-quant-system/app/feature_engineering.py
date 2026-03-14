@@ -17,6 +17,10 @@ from .data_pipeline import (
 
 logger = logging.getLogger(__name__)
 
+# League-average rate constants for shooting rate approximations
+LEAGUE_AVG_3P_RATE = 0.37
+LEAGUE_AVG_FT_RATE = 0.27
+
 
 # ---------------------------------------------------------------------------
 # Possession-model helper functions
@@ -244,7 +248,8 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     feat[f"{prefix}_avg_allowed_last5"] = np.mean([g["allowed"] for g in last5])
     feat[f"{prefix}_margin_last5"] = np.mean([g["margin"] for g in last5])
 
-    # Last-5 offensive rating & pace (for total classifier)
+    # Last-5 offensive rating & pace (for total classifier).
+    # 2.14 = avg PPP factor for possession estimation; 210.0 = approximate league-average total.
     last5_avg_score = np.mean([g["scored"] for g in last5])
     last5_avg_total = np.mean([g["total"] for g in last5]) if last5 else 210.0
     last5_est_poss = max(last5_avg_total / 2.14, 1)
@@ -289,11 +294,9 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     # 3-point rate and free-throw rate approximations.
     # Box-score-level 3PA/FGA/FTA are not stored in the games table, so we
     # derive proxies from the team's scoring efficiency relative to league avg.
-    # Higher off_rating → higher 3p_rate; lower → lower.  League averages:
-    # 3P rate ≈ 0.37, FT rate ≈ 0.27.
     _league_off = 110.0
-    feat[f"{prefix}_3p_rate"] = 0.37 * (off_rtg / _league_off)
-    feat[f"{prefix}_ft_rate"] = 0.27 * (off_rtg / _league_off)
+    feat[f"{prefix}_3p_rate"] = LEAGUE_AVG_3P_RATE * (off_rtg / _league_off)
+    feat[f"{prefix}_ft_rate"] = LEAGUE_AVG_FT_RATE * (off_rtg / _league_off)
 
     # Opponent efficiency
     if opp_games:

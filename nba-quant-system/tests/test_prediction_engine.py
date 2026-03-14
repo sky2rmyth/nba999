@@ -1,9 +1,12 @@
 """Tests for prediction_engine recommendation, signal score, and core pick logic."""
 from __future__ import annotations
 
+from wcwidth import wcswidth
+
 from app.prediction_engine import (
     build_pick_icon,
     build_prediction_table,
+    pad,
     ICON_CORE,
     ICON_RECOMMEND,
     ICON_NO,
@@ -44,6 +47,46 @@ class TestBuildPickIcon:
         result_both = build_pick_icon(True, True, "over")
         result_core_only = build_pick_icon(True, False, "over")
         assert result_both == result_core_only == ICON_CORE
+
+
+class TestPad:
+    """Test pad() handles Chinese and ASCII text correctly."""
+
+    def test_ascii_padding(self):
+        result = pad("hello", 10)
+        assert result == "hello     "
+        assert len(result) == 10
+
+    def test_chinese_padding(self):
+        # "比赛" has display width 4 (2 chars * 2 width each)
+        result = pad("比赛", 10)
+        assert len(result) == 8  # 2 Chinese chars + 6 spaces
+        # Verify the display width is correct
+        assert wcswidth(result.rstrip()) + (10 - wcswidth("比赛")) == 10
+
+    def test_mixed_chinese_ascii(self):
+        # "猛龙 vs 森林狼" = 2+2+1+1+1+1+2+2+2 = 14 display width
+        result = pad("猛龙 vs 森林狼", 22)
+        text_width = wcswidth("猛龙 vs 森林狼")
+        spaces = 22 - text_width
+        assert result == "猛龙 vs 森林狼" + " " * spaces
+
+    def test_exact_width(self):
+        result = pad("hello", 5)
+        assert result == "hello"
+
+    def test_exceeds_width(self):
+        result = pad("hello world", 5)
+        assert result == "hello world"
+
+    def test_non_string_input(self):
+        result = pad(227.5, 6)
+        assert result == "227.5 "
+
+    def test_emoji_padding(self):
+        result = pad("⭐", 4)
+        assert isinstance(result, str)
+        assert result.startswith("⭐")
 
 
 class TestBuildPredictionTable:

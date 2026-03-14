@@ -6,6 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+from wcwidth import wcswidth
 
 from .api_client import BallDontLieClient
 from .bookmaker_behavior import analyze_line_behavior
@@ -89,6 +90,23 @@ def build_pick_icon(is_core, is_recommend, direction):
     return ""
 
 
+def pad(text, width):
+    """Pad *text* to a fixed display *width* using :func:`wcswidth`.
+
+    Chinese characters occupy 2 columns in a terminal, so plain
+    ``str.ljust`` produces misaligned output.  This helper computes
+    the real display width and appends the correct number of spaces.
+    """
+    text = str(text)
+    w = wcswidth(text)
+    if w < 0:
+        # wcswidth returns -1 for non-printable chars; fall back to len
+        w = len(text)
+    if w < width:
+        return text + " " * (width - w)
+    return text
+
+
 def build_prediction_table(games):
     """Build a fixed-width Chinese table for Telegram output.
 
@@ -97,13 +115,22 @@ def build_prediction_table(games):
                under_prob, prediction, is_core.
     """
 
-    lines = []
-    lines.append("┌──────────────────────┬──────┬────────┬────────┬────────┬──────┐")
-    lines.append("│ 比赛                 │ 盘口 │ 大分概率 │ 小分概率 │ 模型判断 │ 重心 │")
-    lines.append("├──────────────────────┼──────┼────────┼────────┼────────┼──────┤")
+    headers = [
+        ("比赛", 22),
+        ("盘口", 6),
+        ("大分概率", 10),
+        ("小分概率", 10),
+        ("模型判断", 8),
+        ("重心", 4),
+    ]
 
-    # Column widths: 比赛(22), 盘口(6), 大分概率(8), 小分概率(8), 模型判断(8), 重心(4)
-    row_format = "{:<22} {:>6} {:>8} {:>8} {:>8} {:>4}"
+    header_line = "│ " + " │ ".join(pad(h, w) for h, w in headers) + " │"
+    display_width = wcswidth(header_line)
+
+    lines = []
+    lines.append("┌" + "─" * (display_width - 2) + "┐")
+    lines.append(header_line)
+    lines.append("├" + "─" * (display_width - 2) + "┤")
 
     for g in games:
         match = f"{g['away']} vs {g['home']}"
@@ -113,10 +140,19 @@ def build_prediction_table(games):
         prediction = g["prediction"]
         star = ICON_CORE if g.get("is_core") else ""
 
-        row = f"│ {row_format.format(match, line, over_prob, under_prob, prediction, star)} │"
+        row_data = [
+            (match, 22),
+            (line, 6),
+            (over_prob, 10),
+            (under_prob, 10),
+            (prediction, 8),
+            (star, 4),
+        ]
+
+        row = "│ " + " │ ".join(pad(v, w) for v, w in row_data) + " │"
         lines.append(row)
 
-    lines.append("└──────────────────────┴──────┴────────┴────────┴────────┴──────┘")
+    lines.append("└" + "─" * (display_width - 2) + "┘")
 
     return "\n".join(lines)
 

@@ -97,7 +97,7 @@ def _build_classifier():
 def _build_total_classifier():
     """Build GradientBoostingClassifier for totals over/under prediction."""
     from sklearn.ensemble import GradientBoostingClassifier
-    gb_params = dict(n_estimators=150, learning_rate=0.05, max_depth=5, random_state=42)
+    gb_params = dict(n_estimators=300, learning_rate=0.03, max_depth=3, random_state=42)
     return GradientBoostingClassifier(**gb_params)
 
 
@@ -150,18 +150,29 @@ def train_models(df: pd.DataFrame, total_df: pd.DataFrame | None = None) -> Mode
     # --- Total Over/Under classifier (GradientBoostingClassifier) ---
     # Uses closing_total from historical predictions as the threshold.
     # Label: 1 if total_score > closing_total, else 0.
+    # Wrapped with CalibratedClassifierCV (isotonic) for well-calibrated probabilities.
     total_model = None
     to_acc = 0.0
     if total_df is not None and not total_df.empty and "label" in total_df.columns:
-        total_model = _build_total_classifier()
+        base_total_model = _build_total_classifier()
         X_total = total_df[TOTAL_FEATURE_COLUMNS].values
         y_total = total_df["label"].values
         Xto_train, Xto_test, yto_train, yto_test = train_test_split(
             X_total, y_total, test_size=0.2, random_state=42
         )
-        total_model.fit(Xto_train, yto_train)
-        to_acc = float(np.mean(total_model.predict(Xto_test) == yto_test))
+        base_total_model.fit(Xto_train, yto_train)
+        to_acc = float(np.mean(base_total_model.predict(Xto_test) == yto_test))
         logger.info("Total Over Accuracy (vs closing line): %.2f%%", to_acc * 100)
+
+        # Calibrate with isotonic regression
+        from sklearn.calibration import CalibratedClassifierCV
+        total_model = CalibratedClassifierCV(
+            estimator=base_total_model,
+            method="isotonic",
+            cv=5,
+        )
+        total_model.fit(X_total, y_total)
+        logger.info("Total model calibrated (isotonic, cv=5)")
     else:
         logger.info("No total training data with closing lines — total model skipped")
 

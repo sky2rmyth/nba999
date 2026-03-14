@@ -81,69 +81,41 @@ def build_pick_icon(is_core, is_recommend, direction):
 
     Args:
         is_core: Whether this is the core pick of the day.
-        is_recommend: Whether this game is recommended.
-        direction: 'over' or 'under' indicating the predicted direction.
+        is_recommend: Whether this game is recommended (unused in new format).
+        direction: 'over' or 'under' indicating the predicted direction (unused in new format).
     """
-
-    if direction == "over":
-        d = ICON_OVER + "大"
-    else:
-        d = ICON_UNDER + "小"
-
     if is_core:
-        return ICON_CORE + d
-
-    if is_recommend:
-        return ICON_RECOMMEND + d
-
-    return ICON_NO
+        return ICON_CORE
+    return ""
 
 
 def build_prediction_table(games):
-    """Build a pipe-separated table string for Telegram output.
+    """Build a fixed-width Chinese table for Telegram output.
 
     Args:
-        games: List of dicts with keys: away, home, line, pred_total,
-               edge, prob, low, high, direction, is_core, is_recommend.
+        games: List of dicts with keys: away, home, line, over_prob,
+               under_prob, prediction, is_core.
     """
 
     lines = []
+    lines.append("┌──────────────────────┬──────┬────────┬────────┬────────┬──────┐")
+    lines.append("│ 比赛                 │ 盘口 │ 大分概率 │ 小分概率 │ 模型判断 │ 重心 │")
+    lines.append("├──────────────────────┼──────┼────────┼────────┼────────┼──────┤")
 
-    header = (
-        "比赛 | 盘口 | 模型 | Edge | 概率 | 区间 | 推荐\n"
-        "------------------------------------------------"
-    )
-
-    lines.append(header)
+    row_format = "{:<22} {:>6} {:>8} {:>8} {:>8} {:>4}"
 
     for g in games:
-
         match = f"{g['away']} vs {g['home']}"
-        line = g["line"]
-        model = round(g["pred_total"], 1)
-        edge = round(g["edge"], 1)
+        line = str(g["line"])
+        over_prob = f"{g['over_prob']:.1%}" if isinstance(g['over_prob'], float) else str(g['over_prob'])
+        under_prob = f"{g['under_prob']:.1%}" if isinstance(g['under_prob'], float) else str(g['under_prob'])
+        prediction = g["prediction"]
+        star = ICON_CORE if g.get("is_core") else ""
 
-        prob = int(g["prob"] * 100)
-
-        interval = f"{int(g['low'])}-{int(g['high'])}"
-
-        pick = build_pick_icon(
-            g["is_core"],
-            g["is_recommend"],
-            g["direction"]
-        )
-
-        row = (
-            f"{match} | "
-            f"{line} | "
-            f"{model} | "
-            f"{edge:+} | "
-            f"{prob}% | "
-            f"{interval} | "
-            f"{pick}"
-        )
-
+        row = f"│ {row_format.format(match, line, over_prob, under_prob, prediction, star)} │"
         lines.append(row)
+
+    lines.append("└──────────────────────┴──────┴────────┴────────┴────────┴──────┘")
 
     return "\n".join(lines)
 
@@ -415,26 +387,41 @@ def run_prediction(target_date: str | None = None) -> None:
         if model_bundle.total_model is not None and live_total is not None:
             try:
                 feat_row = feat.iloc[0]
+                hp_val = float(feat_row.get("home_pace", 98.0))
+                ap_val = float(feat_row.get("away_pace", 98.0))
+                home_off_val = float(feat_row.get("home_off_rating", 110.0))
+                away_off_val = float(feat_row.get("away_off_rating", 110.0))
+                home_def_val = float(feat_row.get("home_def_rating", 110.0))
+                away_def_val = float(feat_row.get("away_def_rating", 110.0))
                 total_feat_row = {
                     "closing_total": live_total,
                     "opening_total": opening_total if opening_total is not None else live_total,
                     "line_movement": (live_total - opening_total) if opening_total is not None else 0.0,
-                    "home_pace": float(feat_row.get("home_pace", 98.0)),
-                    "away_pace": float(feat_row.get("away_pace", 98.0)),
-                    "home_off_rating": float(feat_row.get("home_off_rating", 110.0)),
-                    "away_off_rating": float(feat_row.get("away_off_rating", 110.0)),
-                    "home_def_rating": float(feat_row.get("home_def_rating", 110.0)),
-                    "away_def_rating": float(feat_row.get("away_def_rating", 110.0)),
+                    "home_pace": hp_val,
+                    "away_pace": ap_val,
+                    "pace_avg": (hp_val + ap_val) / 2.0,
+                    "pace_diff": hp_val - ap_val,
+                    "home_off_rating": home_off_val,
+                    "away_off_rating": away_off_val,
+                    "home_def_rating": home_def_val,
+                    "away_def_rating": away_def_val,
                     "home_3p_rate": float(feat_row.get("home_3p_rate", 0.37)),
                     "away_3p_rate": float(feat_row.get("away_3p_rate", 0.37)),
                     "home_ft_rate": float(feat_row.get("home_ft_rate", 0.27)),
                     "away_ft_rate": float(feat_row.get("away_ft_rate", 0.27)),
-                    "last5_home_off_rating": float(feat_row.get("last5_home_off_rating", 110.0)),
-                    "last5_away_off_rating": float(feat_row.get("last5_away_off_rating", 110.0)),
-                    "last5_home_pace": float(feat_row.get("last5_home_pace", 98.0)),
-                    "last5_away_pace": float(feat_row.get("last5_away_pace", 98.0)),
-                    "rest_days_home": float(feat_row.get("home_rest_days", 2.0)),
-                    "rest_days_away": float(feat_row.get("away_rest_days", 2.0)),
+                    "home_off_reb_rate": float(feat_row.get("home_off_reb_rate", 0.25)),
+                    "away_off_reb_rate": float(feat_row.get("away_off_reb_rate", 0.25)),
+                    "home_last5_pace": float(feat_row.get("last5_home_pace", 98.0)),
+                    "away_last5_pace": float(feat_row.get("last5_away_pace", 98.0)),
+                    "home_last5_off_rating": float(feat_row.get("last5_home_off_rating", 110.0)),
+                    "away_last5_off_rating": float(feat_row.get("last5_away_off_rating", 110.0)),
+                    "home_rest_days": float(feat_row.get("home_rest_days", 2.0)),
+                    "away_rest_days": float(feat_row.get("away_rest_days", 2.0)),
+                    "home_back_to_back": float(feat_row.get("home_b2b", 0.0)),
+                    "away_back_to_back": float(feat_row.get("away_b2b", 0.0)),
+                    "pace_interaction": hp_val * ap_val,
+                    "off_vs_def_home": home_off_val - away_def_val,
+                    "off_vs_def_away": away_off_val - home_def_val,
                 }
                 total_feat_df = pd.DataFrame([total_feat_row])[TOTAL_FEATURE_COLUMNS]
                 total_over_prob_model = float(model_bundle.total_model.predict_proba(total_feat_df)[0][1])
@@ -656,94 +643,44 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
     # --- Daily recommendation ---
-    # Edge-only filter: abs(edge) < 4 → not recommended.
-    # abs(edge) >= 4 and < 7 → recommended.
-    # abs(edge) >= 7 → star_pick.
-    # Min recommendations based on game count; auto-fill if needed.
-    # Guaranteed 1 core (star) pick per day.
-    # Cap at 5 recommendations.
-    MAX_DAILY_RECOMMENDATIONS = 5
+    # Sort all games by confidence = abs(prob_over - 0.5) descending.
+    # Core pick: the game with max confidence where probability >= 0.60.
+    # Only 1 core pick allowed per day.
     if game_results:
-        sorted_results = sorted(game_results, key=lambda x: abs(x["total_edge_pts"]), reverse=True)
-
-        # Determine minimum recommendations based on game count
-        total_games = len(sorted_results)
-        if total_games >= 5:
-            min_recommend = 4
-        elif total_games == 4:
-            min_recommend = 3
-        else:
-            min_recommend = 1
-
-        for gr in sorted_results:
-            abs_edge_val = abs(gr["total_edge_pts"])
-            if abs_edge_val >= 4:
-                gr["recommended"] = True
-            else:
-                gr["recommended"] = False
-            if abs_edge_val >= 7:
-                gr["star_pick"] = True
-            else:
-                gr["star_pick"] = False
+        # Compute confidence for each game
+        for gr in game_results:
+            gr["confidence"] = abs(gr["over_probability"] - 0.5)
             gr["is_core"] = False
 
-        # Collect quality-filtered recommendations
-        recommended_games = [gr for gr in sorted_results if gr["recommended"]]
+        sorted_results = sorted(game_results, key=lambda x: x["confidence"], reverse=True)
 
-        # Auto-fill if recommendations below minimum
-        if len(recommended_games) < min_recommend:
-            for gr in sorted_results:
-                if not gr["recommended"]:
-                    gr["recommended"] = True
-                    recommended_games.append(gr)
-                if len(recommended_games) >= min_recommend:
-                    break
-
-        # Cap recommendations at MAX_DAILY_RECOMMENDATIONS by abs(edge)
-        if len(recommended_games) > MAX_DAILY_RECOMMENDATIONS:
-            recommended_games = sorted(
-                recommended_games, key=lambda x: abs(x["total_edge_pts"]), reverse=True
-            )[:MAX_DAILY_RECOMMENDATIONS]
-            # Mark excess as not recommended
-            keep_indices = {g["idx"] for g in recommended_games}
-            for gr in sorted_results:
-                if gr["recommended"] and gr["idx"] not in keep_indices:
-                    gr["recommended"] = False
-
-        # Guaranteed core pick: prefer star_pick with largest abs(edge)
-        star_results = [gr for gr in sorted_results if gr["recommended"] and gr["star_pick"]]
-        if star_results:
-            star_results[0]["is_core"] = True
-        else:
-            # No star_pick qualifies — promote the recommended game with largest abs(edge)
-            rec_sorted = sorted(
-                [gr for gr in sorted_results if gr["recommended"]],
-                key=lambda x: abs(x["total_edge_pts"]),
-                reverse=True,
-            )
-            if rec_sorted:
-                rec_sorted[0]["star_pick"] = True
-                rec_sorted[0]["is_core"] = True
+        # Core pick: max confidence game with max(over_prob, under_prob) >= 0.60
+        for gr in sorted_results:
+            max_prob = max(gr["over_probability"], gr["under_probability"])
+            if max_prob >= 0.60:
+                gr["is_core"] = True
+                break  # Only 1 core pick
     else:
         sorted_results = []
 
     # --- Build table output for all games ---
     predictions = []
     for gr in sorted_results:
-        direction = "over" if gr["total_edge_pts"] > 0 else "under"
-        prob = gr["over_probability"] if direction == "over" else gr["under_probability"]
+        prob_over = gr["over_probability"]
+        prob_under = gr["under_probability"]
+        if prob_over > 0.5:
+            prediction = "大分"
+        else:
+            prediction = "小分"
+
         predictions.append({
             "away": zh_name(gr["vis"]["full_name"]),
             "home": zh_name(gr["home"]["full_name"]),
             "line": gr["live_total"],
-            "pred_total": gr["predicted_total"],
-            "edge": gr["total_edge_pts"],
-            "prob": prob,
-            "low": gr["low"],
-            "high": gr["high"],
-            "direction": direction,
+            "over_prob": prob_over,
+            "under_prob": prob_under,
+            "prediction": prediction,
             "is_core": gr["is_core"],
-            "is_recommend": gr["recommended"],
         })
 
     table = build_prediction_table(predictions)
@@ -768,7 +705,7 @@ def run_prediction(target_date: str | None = None) -> None:
     logger.info("Model version: %s", model_bundle.version)
 
     # --- Step 10: Send Telegram (only after training ✔, simulation ✔, database save ✔) ---
-    msg = f"\n🏀 NBA量化预测｜{target_date}\n\n{table}\n"
+    msg = f"\n🏀 NBA大小分预测｜{target_date}\n\n{table}\n"
     send_message(msg)
     logger.info("Telegram message sent successfully")
 

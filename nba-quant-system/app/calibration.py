@@ -32,7 +32,9 @@ def calibrate(
         A **fitted** sklearn classifier that exposes ``predict_proba``.
     df:
         DataFrame containing :data:`~app.dataset_builder.CLASSIFIER_FEATURES`
-        and a ``"label"`` column.  Used as the calibration set.
+        and a ``"label"`` column.  ``CalibratedClassifierCV`` with
+        ``cv=int`` refits the base estimator on each fold internally, so
+        calibration is not performed on training predictions.
     cv:
         Number of cross-validation folds used by the calibrator.
 

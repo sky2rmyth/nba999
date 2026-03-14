@@ -102,7 +102,9 @@ def build_dataset(db_path: Path = DB_PATH) -> pd.DataFrame:
         final_total = home_score + away_score
         label = 1 if final_total > closing_total else 0
 
-        # Compute per-team features via existing helper
+        # Compute per-team features via existing helper.
+        # _compute_team_features uses "last5_{prefix}_*" / "{prefix}_rest_days"
+        # naming; we map those to the CLASSIFIER_FEATURES names below.
         home_feat = _compute_team_features(conn, home_id, away_id, game_date, "home")
         away_feat = _compute_team_features(conn, away_id, home_id, game_date, "away")
 
@@ -130,12 +132,12 @@ def build_dataset(db_path: Path = DB_PATH) -> pd.DataFrame:
             "away_3p_rate": away_feat.get("away_3p_rate", 0.0),
             "home_ft_rate": home_feat.get("home_ft_rate", 0.0),
             "away_ft_rate": away_feat.get("away_ft_rate", 0.0),
-            # Last-5
+            # Last-5 (mapped from last5_{prefix}_off_rating / last5_{prefix}_pace)
             "home_last5_off": home_feat.get("last5_home_off_rating", 0.0),
             "away_last5_off": away_feat.get("last5_away_off_rating", 0.0),
             "home_last5_pace": home_feat.get("last5_home_pace", 0.0),
             "away_last5_pace": away_feat.get("last5_away_pace", 0.0),
-            # Rest
+            # Rest (mapped from {prefix}_rest_days)
             "home_rest": home_feat.get("home_rest_days", 0.0),
             "away_rest": away_feat.get("away_rest_days", 0.0),
             # Label

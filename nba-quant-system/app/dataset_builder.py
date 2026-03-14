@@ -18,7 +18,7 @@ from .feature_engineering import _compute_team_features
 
 logger = logging.getLogger(__name__)
 
-# 21 features used by the totals classifier.
+# 28 features used by the totals classifier (matches TOTAL_FEATURE_COLUMNS).
 CLASSIFIER_FEATURES: list[str] = [
     # Odds / line features
     "closing_total",
@@ -39,15 +39,24 @@ CLASSIFIER_FEATURES: list[str] = [
     "away_3p_rate",
     "home_ft_rate",
     "away_ft_rate",
-    # Last-5 games offensive rating
-    "home_last5_off",
-    "away_last5_off",
+    # Offensive rebound rate
+    "home_off_reb_rate",
+    "away_off_reb_rate",
     # Last-5 games pace
     "home_last5_pace",
     "away_last5_pace",
-    # Rest days
-    "home_rest",
-    "away_rest",
+    # Last-5 games offensive rating
+    "home_last5_off_rating",
+    "away_last5_off_rating",
+    # Rest / fatigue
+    "home_rest_days",
+    "away_rest_days",
+    "home_back_to_back",
+    "away_back_to_back",
+    # Interaction features
+    "pace_interaction",
+    "off_vs_def_home",
+    "off_vs_def_away",
 ]
 
 
@@ -132,14 +141,23 @@ def build_dataset(db_path: Path = DB_PATH) -> pd.DataFrame:
             "away_3p_rate": away_feat.get("away_3p_rate", 0.0),
             "home_ft_rate": home_feat.get("home_ft_rate", 0.0),
             "away_ft_rate": away_feat.get("away_ft_rate", 0.0),
-            # Last-5 (mapped from last5_{prefix}_off_rating / last5_{prefix}_pace)
-            "home_last5_off": home_feat.get("last5_home_off_rating", 0.0),
-            "away_last5_off": away_feat.get("last5_away_off_rating", 0.0),
+            # Offensive rebound rate
+            "home_off_reb_rate": home_feat.get("home_off_reb_rate", 0.0),
+            "away_off_reb_rate": away_feat.get("away_off_reb_rate", 0.0),
+            # Last-5 (mapped from last5_{prefix}_* names)
             "home_last5_pace": home_feat.get("last5_home_pace", 0.0),
             "away_last5_pace": away_feat.get("last5_away_pace", 0.0),
-            # Rest (mapped from {prefix}_rest_days)
-            "home_rest": home_feat.get("home_rest_days", 0.0),
-            "away_rest": away_feat.get("away_rest_days", 0.0),
+            "home_last5_off_rating": home_feat.get("last5_home_off_rating", 0.0),
+            "away_last5_off_rating": away_feat.get("last5_away_off_rating", 0.0),
+            # Rest (mapped from {prefix}_rest_days / {prefix}_b2b)
+            "home_rest_days": home_feat.get("home_rest_days", 0.0),
+            "away_rest_days": away_feat.get("away_rest_days", 0.0),
+            "home_back_to_back": home_feat.get("home_b2b", 0.0),
+            "away_back_to_back": away_feat.get("away_b2b", 0.0),
+            # Interaction features
+            "pace_interaction": hp * ap,
+            "off_vs_def_home": home_feat.get("home_off_rating", 0.0) - away_feat.get("away_def_rating", 0.0),
+            "off_vs_def_away": away_feat.get("away_off_rating", 0.0) - home_feat.get("home_def_rating", 0.0),
             # Label
             "label": label,
         }

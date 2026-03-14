@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # League-average rate constants for shooting rate approximations
 LEAGUE_AVG_3P_RATE = 0.37
 LEAGUE_AVG_FT_RATE = 0.27
+LEAGUE_AVG_ORB_RATE = 0.25
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +141,7 @@ FEATURE_COLUMNS = [
 
 
 # Feature columns for the totals over/under classification model.
-# These are the 19 input features used by GradientBoostingClassifier.
+# These are the 28 input features used by GradientBoostingClassifier.
 TOTAL_FEATURE_COLUMNS = [
     # Odds / line features
     "closing_total",
@@ -149,6 +150,8 @@ TOTAL_FEATURE_COLUMNS = [
     # Pace
     "home_pace",
     "away_pace",
+    "pace_avg",
+    "pace_diff",
     # Offensive / defensive ratings
     "home_off_rating",
     "away_off_rating",
@@ -159,15 +162,24 @@ TOTAL_FEATURE_COLUMNS = [
     "away_3p_rate",
     "home_ft_rate",
     "away_ft_rate",
-    # Last-5 games offensive rating
-    "last5_home_off_rating",
-    "last5_away_off_rating",
+    # Offensive rebound rate
+    "home_off_reb_rate",
+    "away_off_reb_rate",
     # Last-5 games pace
-    "last5_home_pace",
-    "last5_away_pace",
-    # Rest days
-    "rest_days_home",
-    "rest_days_away",
+    "home_last5_pace",
+    "away_last5_pace",
+    # Last-5 games offensive rating
+    "home_last5_off_rating",
+    "away_last5_off_rating",
+    # Rest / fatigue
+    "home_rest_days",
+    "away_rest_days",
+    "home_back_to_back",
+    "away_back_to_back",
+    # Interaction features
+    "pace_interaction",
+    "off_vs_def_home",
+    "off_vs_def_away",
 ]
 
 
@@ -215,6 +227,7 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
         feat[f"last5_{prefix}_pace"] = 0.0
         feat[f"{prefix}_3p_rate"] = 0.0
         feat[f"{prefix}_ft_rate"] = 0.0
+        feat[f"{prefix}_off_reb_rate"] = 0.0
         return feat
 
     scores = [g["scored"] for g in games]
@@ -297,6 +310,7 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     _league_off = 110.0
     feat[f"{prefix}_3p_rate"] = LEAGUE_AVG_3P_RATE * (off_rtg / _league_off)
     feat[f"{prefix}_ft_rate"] = LEAGUE_AVG_FT_RATE * (off_rtg / _league_off)
+    feat[f"{prefix}_off_reb_rate"] = LEAGUE_AVG_ORB_RATE * (off_rtg / _league_off)
 
     # Opponent efficiency
     if opp_games:
@@ -424,9 +438,30 @@ def build_total_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
         row["opening_total"] = opening_total_val
         row["line_movement"] = closing_total - opening_total_val
 
-        # Map rest day column names to match TOTAL_FEATURE_COLUMNS
-        row["rest_days_home"] = row.get("home_rest_days", 0.0)
-        row["rest_days_away"] = row.get("away_rest_days", 0.0)
+        # Pace derived features
+        hp = row.get("home_pace", 98.0)
+        ap = row.get("away_pace", 98.0)
+        row["pace_avg"] = (hp + ap) / 2.0
+        row["pace_diff"] = hp - ap
+
+        # Map last5 column names to match TOTAL_FEATURE_COLUMNS
+        row["home_last5_off_rating"] = row.get("last5_home_off_rating", 0.0)
+        row["away_last5_off_rating"] = row.get("last5_away_off_rating", 0.0)
+        row["home_last5_pace"] = row.get("last5_home_pace", 0.0)
+        row["away_last5_pace"] = row.get("last5_away_pace", 0.0)
+
+        # Back-to-back flag
+        row["home_back_to_back"] = row.get("home_b2b", 0.0)
+        row["away_back_to_back"] = row.get("away_b2b", 0.0)
+
+        # Interaction features
+        row["pace_interaction"] = hp * ap
+        home_off = row.get("home_off_rating", 0.0)
+        away_off = row.get("away_off_rating", 0.0)
+        home_def = row.get("home_def_rating", 0.0)
+        away_def = row.get("away_def_rating", 0.0)
+        row["off_vs_def_home"] = home_off - away_def
+        row["off_vs_def_away"] = away_off - home_def
 
         # Target label
         row["label"] = label

@@ -39,8 +39,10 @@ def synthetic_df():
             data[col] = rng.uniform(215, 235, n)
         elif col == "line_movement":
             data[col] = rng.uniform(-3, 3, n)
-        elif "pace" in col:
+        elif "pace" in col and "interaction" not in col:
             data[col] = rng.uniform(95, 105, n)
+        elif col == "pace_interaction":
+            data[col] = rng.uniform(9000, 11000, n)
         elif "off_rating" in col or "last5_off" in col:
             data[col] = rng.uniform(105, 120, n)
         elif "def_rating" in col:
@@ -49,8 +51,14 @@ def synthetic_df():
             data[col] = rng.uniform(0.30, 0.45, n)
         elif "ft_rate" in col:
             data[col] = rng.uniform(0.20, 0.35, n)
-        elif "rest" in col:
+        elif "off_reb_rate" in col:
+            data[col] = rng.uniform(0.20, 0.30, n)
+        elif "rest" in col and "back" not in col:
             data[col] = rng.choice([1, 2, 3, 4], n).astype(float)
+        elif "back_to_back" in col:
+            data[col] = rng.choice([0, 1], n).astype(float)
+        elif "off_vs_def" in col:
+            data[col] = rng.uniform(-15, 15, n)
         else:
             data[col] = rng.uniform(0, 1, n)
     total_scores = data["closing_total"] + rng.uniform(-15, 15, n)
@@ -67,7 +75,7 @@ class TestClassifierFeatures:
     """CLASSIFIER_FEATURES structure matches the specification."""
 
     def test_feature_count(self):
-        assert len(CLASSIFIER_FEATURES) == 21
+        assert len(CLASSIFIER_FEATURES) == 28
 
     def test_odds_features(self):
         assert "closing_total" in CLASSIFIER_FEATURES
@@ -88,14 +96,27 @@ class TestClassifierFeatures:
                   "home_ft_rate", "away_ft_rate"):
             assert f in CLASSIFIER_FEATURES
 
+    def test_off_reb_rate_features(self):
+        assert "home_off_reb_rate" in CLASSIFIER_FEATURES
+        assert "away_off_reb_rate" in CLASSIFIER_FEATURES
+
     def test_last5_features(self):
-        for f in ("home_last5_off", "away_last5_off",
+        for f in ("home_last5_off_rating", "away_last5_off_rating",
                   "home_last5_pace", "away_last5_pace"):
             assert f in CLASSIFIER_FEATURES
 
     def test_rest_features(self):
-        assert "home_rest" in CLASSIFIER_FEATURES
-        assert "away_rest" in CLASSIFIER_FEATURES
+        assert "home_rest_days" in CLASSIFIER_FEATURES
+        assert "away_rest_days" in CLASSIFIER_FEATURES
+
+    def test_back_to_back_features(self):
+        assert "home_back_to_back" in CLASSIFIER_FEATURES
+        assert "away_back_to_back" in CLASSIFIER_FEATURES
+
+    def test_interaction_features(self):
+        assert "pace_interaction" in CLASSIFIER_FEATURES
+        assert "off_vs_def_home" in CLASSIFIER_FEATURES
+        assert "off_vs_def_away" in CLASSIFIER_FEATURES
 
 
 class TestLabelLogic:
@@ -154,7 +175,7 @@ class TestTrain:
 
     def test_n_features_matches(self, synthetic_df):
         _, metrics = train(synthetic_df)
-        assert metrics["n_features"] == 21
+        assert metrics["n_features"] == 28
 
 
 # ===================================================================

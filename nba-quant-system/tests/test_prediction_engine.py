@@ -1,6 +1,8 @@
 """Tests for prediction_engine recommendation, signal score, and core pick logic."""
 from __future__ import annotations
 
+from wcwidth import wcswidth
+
 from app.prediction_engine import (
     build_pick_icon,
     build_prediction_table,
@@ -59,14 +61,12 @@ class TestPad:
         # "比赛" has display width 4 (2 chars * 2 width each)
         result = pad("比赛", 10)
         assert len(result) == 8  # 2 Chinese chars + 6 spaces
-        from wcwidth import wcswidth
         # Verify the display width is correct
         assert wcswidth(result.rstrip()) + (10 - wcswidth("比赛")) == 10
 
     def test_mixed_chinese_ascii(self):
         # "猛龙 vs 森林狼" = 2+2+1+1+1+1+2+2+2 = 14 display width
         result = pad("猛龙 vs 森林狼", 22)
-        from wcwidth import wcswidth
         text_width = wcswidth("猛龙 vs 森林狼")
         spaces = 22 - text_width
         assert result == "猛龙 vs 森林狼" + " " * spaces

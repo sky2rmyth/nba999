@@ -125,12 +125,12 @@ def build_prediction_table(games):
     ]
 
     header_line = "│ " + " │ ".join(pad(h, w) for h, w in headers) + " │"
-    rule_len = len(header_line)
+    display_width = wcswidth(header_line)
 
     lines = []
-    lines.append("┌" + "─" * (rule_len - 2) + "┐")
+    lines.append("┌" + "─" * (display_width - 2) + "┐")
     lines.append(header_line)
-    lines.append("├" + "─" * (rule_len - 2) + "┤")
+    lines.append("├" + "─" * (display_width - 2) + "┤")
 
     for g in games:
         match = f"{g['away']} vs {g['home']}"
@@ -152,7 +152,7 @@ def build_prediction_table(games):
         row = "│ " + " │ ".join(pad(v, w) for v, w in row_data) + " │"
         lines.append(row)
 
-    lines.append("└" + "─" * (rule_len - 2) + "┘")
+    lines.append("└" + "─" * (display_width - 2) + "┘")
 
     return "\n".join(lines)
 

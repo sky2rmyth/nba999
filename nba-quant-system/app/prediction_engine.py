@@ -12,7 +12,8 @@ from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games, fetch_player_injuries
 from .feature_engineering import (
-    FEATURE_COLUMNS, _compute_team_features, calculate_game_pace, calculate_ppp,
+    FEATURE_COLUMNS, TOTAL_FEATURE_COLUMNS,
+    _compute_team_features, calculate_game_pace, calculate_ppp,
     calculate_three_point_rate, calculate_free_throw_rate,
     calculate_orb_rate, calculate_tov_rate,
 )
@@ -165,7 +166,13 @@ def _match_primary_odds(primary_odds: list, home_name: str, visitor_name: str) -
 
 
 def _build_prediction_features(home_id: int, away_id: int) -> pd.DataFrame:
-    """Build feature row for prediction using live game data."""
+    """Build feature row for prediction using live game data.
+
+    Returns a DataFrame that contains *at least* ``FEATURE_COLUMNS``.  Extra
+    columns produced by ``_compute_team_features`` (e.g. ``last5_*``,
+    ``*_3p_rate``, ``*_ft_rate``) are preserved so that the total classifier
+    can use them.
+    """
     with get_conn() as conn:
         # Use tomorrow's date to include all available data
         future_date = "9999-12-31"
@@ -184,7 +191,8 @@ def _build_prediction_features(home_id: int, away_id: int) -> pd.DataFrame:
     for col in FEATURE_COLUMNS:
         if col not in feat.columns:
             feat[col] = 0.0
-    return feat[FEATURE_COLUMNS]
+    # Keep all columns; callers select FEATURE_COLUMNS or TOTAL_FEATURE_COLUMNS as needed.
+    return feat
 
 
 def run_prediction(target_date: str | None = None) -> None:
@@ -312,8 +320,8 @@ def run_prediction(target_date: str | None = None) -> None:
         # --- Build features and predict scores ---
         feat = _build_prediction_features(home["id"], vis["id"])
 
-        predicted_home_score = float(model_bundle.home_score_model.predict(feat)[0])
-        predicted_away_score = float(model_bundle.away_score_model.predict(feat)[0])
+        predicted_home_score = float(model_bundle.home_score_model.predict(feat[FEATURE_COLUMNS])[0])
+        predicted_away_score = float(model_bundle.away_score_model.predict(feat[FEATURE_COLUMNS])[0])
 
         # --- Model input upgrade: blend last-10 and season ratings ---
         feat_row = feat.iloc[0]
@@ -398,16 +406,69 @@ def run_prediction(target_date: str | None = None) -> None:
         total_over_prob_model = None
         if model_bundle.spread_cover_model is not None:
             try:
-                spread_cover_prob_model = float(model_bundle.spread_cover_model.predict_proba(feat)[0][1])
+                spread_cover_prob_model = float(model_bundle.spread_cover_model.predict_proba(feat[FEATURE_COLUMNS])[0][1])
                 logger.info("Spread Cover Model Prob: %.2f%%", spread_cover_prob_model * 100)
             except Exception:
                 pass
-        if model_bundle.total_model is not None:
+
+        # --- Total classifier: build feature vector with TOTAL_FEATURE_COLUMNS ---
+        if model_bundle.total_model is not None and live_total is not None:
             try:
-                total_over_prob_model = float(model_bundle.total_model.predict_proba(feat)[0][1])
-                logger.info("Total Over Model Prob: %.2f%%", total_over_prob_model * 100)
+                feat_row = feat.iloc[0]
+                total_feat_row = {
+                    "closing_total": live_total,
+                    "opening_total": opening_total if opening_total is not None else live_total,
+                    "line_movement": (live_total - opening_total) if opening_total is not None else 0.0,
+                    "home_pace": float(feat_row.get("home_pace", 98.0)),
+                    "away_pace": float(feat_row.get("away_pace", 98.0)),
+                    "home_off_rating": float(feat_row.get("home_off_rating", 110.0)),
+                    "away_off_rating": float(feat_row.get("away_off_rating", 110.0)),
+                    "home_def_rating": float(feat_row.get("home_def_rating", 110.0)),
+                    "away_def_rating": float(feat_row.get("away_def_rating", 110.0)),
+                    "home_3p_rate": float(feat_row.get("home_3p_rate", 0.37)),
+                    "away_3p_rate": float(feat_row.get("away_3p_rate", 0.37)),
+                    "home_ft_rate": float(feat_row.get("home_ft_rate", 0.27)),
+                    "away_ft_rate": float(feat_row.get("away_ft_rate", 0.27)),
+                    "last5_home_off_rating": float(feat_row.get("last5_home_off_rating", 110.0)),
+                    "last5_away_off_rating": float(feat_row.get("last5_away_off_rating", 110.0)),
+                    "last5_home_pace": float(feat_row.get("last5_home_pace", 98.0)),
+                    "last5_away_pace": float(feat_row.get("last5_away_pace", 98.0)),
+                    "rest_days_home": float(feat_row.get("home_rest_days", 2.0)),
+                    "rest_days_away": float(feat_row.get("away_rest_days", 2.0)),
+                }
+                total_feat_df = pd.DataFrame([total_feat_row])[TOTAL_FEATURE_COLUMNS]
+                total_over_prob_model = float(model_bundle.total_model.predict_proba(total_feat_df)[0][1])
             except Exception:
-                pass
+                logger.debug("Total classifier prediction failed", exc_info=True)
+
+        # --- Total classifier output & prediction rule ---
+        if total_over_prob_model is not None:
+            prob_over = total_over_prob_model
+            prob_under = 1.0 - prob_over
+            if prob_over > 0.5:
+                total_prediction = "Over"
+                total_pick = "大分"
+            else:
+                total_prediction = "Under"
+                total_pick = "小分"
+
+            logger.info("Predicted Over Probability: %.2f%%", prob_over * 100)
+            logger.info("Predicted Under Probability: %.2f%%", prob_under * 100)
+            logger.info("Prediction: %s", total_prediction)
+            logger.info("Closing Line: %.1f", live_total)
+            logger.info("Actual Result: pending")
+
+            print("====== TOTAL CLASSIFIER ======")
+            print("Predicted Over Probability:", round(prob_over, 4))
+            print("Predicted Under Probability:", round(prob_under, 4))
+            print("Prediction:", total_prediction)
+            print("Closing Line:", live_total)
+            print("Actual Result: pending")
+            print("==============================")
+        else:
+            prob_over = None
+            prob_under = None
+            total_prediction = None
 
         # --- Step 4: Monte Carlo simulation ---
         sim = run_possession_simulation(
@@ -456,8 +517,8 @@ def run_prediction(target_date: str | None = None) -> None:
 
         # --- Hybrid total decision: combine Monte Carlo + classifier ---
         mc_total_prob = sim["over_probability"]
-        if total_over_prob_model is not None:
-            combined_total_prob = MC_WEIGHT * mc_total_prob + CLASSIFIER_WEIGHT * total_over_prob_model
+        if prob_over is not None:
+            combined_total_prob = MC_WEIGHT * mc_total_prob + CLASSIFIER_WEIGHT * prob_over
         else:
             combined_total_prob = mc_total_prob
 
@@ -465,7 +526,11 @@ def run_prediction(target_date: str | None = None) -> None:
         calibrated_total_prob = PROB_RAW_WEIGHT * combined_total_prob + PROB_NEUTRAL_WEIGHT * NEUTRAL_PROBABILITY
         combined_total_prob = calibrated_total_prob
 
-        if predicted_total > live_total:
+        # Total pick: use classifier prediction rule when available, else use model total
+        if total_prediction is not None:
+            # total_pick already set by classifier above
+            pass
+        elif predicted_total > live_total:
             total_pick = "大分"
         else:
             total_pick = "小分"

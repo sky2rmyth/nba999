@@ -4,7 +4,7 @@ import logging
 
 from .data_pipeline import bootstrap_historical_data
 from .database import get_conn, init_db
-from .feature_engineering import FEATURE_COLUMNS, build_training_frame
+from .feature_engineering import FEATURE_COLUMNS, build_training_frame, build_total_training_frame
 from .i18n_cn import cn
 from .prediction_models import load_models, train_models, _current_version, MODEL_DIR
 from .rating_engine import is_spread_correct, is_total_correct
@@ -138,13 +138,16 @@ def ensure_models(force: bool = False):
     if df.empty:
         raise RuntimeError("No historical data available for training")
 
+    # Build separate training frame for totals classifier (needs odds data)
+    total_df = build_total_training_frame()
+
     feature_count = len(FEATURE_COLUMNS)
     sample_count = len(df)
     _try_send_telegram(cn("feature_count", feature_count=feature_count))
     _try_send_telegram(cn("sample_count", sample_count=sample_count))
 
     logger.info("Training models...")
-    bundle = train_models(df)
+    bundle = train_models(df, total_df=total_df)
 
     # Send training report to Telegram
     duration = getattr(bundle, "duration", 0)

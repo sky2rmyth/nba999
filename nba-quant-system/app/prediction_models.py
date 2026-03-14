@@ -12,7 +12,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 
 from . import database
-from .feature_engineering import FEATURE_COLUMNS
+from .feature_engineering import FEATURE_COLUMNS, TOTAL_FEATURE_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,14 @@ def _build_classifier():
         return GradientBoostingClassifier(**gb_params), GradientBoostingClassifier(**gb_params)
 
 
-def train_models(df: pd.DataFrame) -> ModelBundle:
+def _build_total_classifier():
+    """Build GradientBoostingClassifier for totals over/under prediction."""
+    from sklearn.ensemble import GradientBoostingClassifier
+    gb_params = dict(n_estimators=150, learning_rate=0.05, max_depth=5, random_state=42)
+    return GradientBoostingClassifier(**gb_params)
+
+
+def train_models(df: pd.DataFrame, total_df: pd.DataFrame | None = None) -> ModelBundle:
     feature_count = len(FEATURE_COLUMNS)
     sample_count = len(df)
     logger.info("Training samples: %d", sample_count)
@@ -131,21 +138,32 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
     # are not available in training data. The classifier learns team strength
     # patterns that correlate with covering; Monte Carlo handles the actual
     # spread line comparison at prediction time.
-    spread_cover_model, total_model = _build_classifier()
+    spread_cover_model, _unused = _build_classifier()
     margin = df["home_score"].values - df["away_score"].values
     y_spread_cover = (margin > 0).astype(int)
-    total_points = df["home_score"].values + df["away_score"].values
-    median_total = float(np.median(total_points))
-    y_total_over = (total_points > median_total).astype(int)
 
     Xsc_train, Xsc_test, ysc_train, ysc_test = train_test_split(
         X, y_spread_cover, test_size=0.2, random_state=42
     )
-    Xto_train, Xto_test, yto_train, yto_test = train_test_split(
-        X, y_total_over, test_size=0.2, random_state=42
-    )
     spread_cover_model.fit(Xsc_train, ysc_train)
-    total_model.fit(Xto_train, yto_train)
+
+    # --- Total Over/Under classifier (GradientBoostingClassifier) ---
+    # Uses closing_total from historical predictions as the threshold.
+    # Label: 1 if total_score > closing_total, else 0.
+    total_model = None
+    to_acc = 0.0
+    if total_df is not None and not total_df.empty and "label" in total_df.columns:
+        total_model = _build_total_classifier()
+        X_total = total_df[TOTAL_FEATURE_COLUMNS].values
+        y_total = total_df["label"].values
+        Xto_train, Xto_test, yto_train, yto_test = train_test_split(
+            X_total, y_total, test_size=0.2, random_state=42
+        )
+        total_model.fit(Xto_train, yto_train)
+        to_acc = float(np.mean(total_model.predict(Xto_test) == yto_test))
+        logger.info("Total Over Accuracy (vs closing line): %.2f%%", to_acc * 100)
+    else:
+        logger.info("No total training data with closing lines — total model skipped")
 
     duration = round(time.time() - start_time, 2)
     logger.info("Training duration: %.2f seconds", duration)
@@ -154,7 +172,6 @@ def train_models(df: pd.DataFrame) -> ModelBundle:
     home_pred = home_model.predict(X_test)
     away_pred = away_model.predict(X_test)
     sc_acc = float(np.mean(spread_cover_model.predict(Xsc_test) == ysc_test))
-    to_acc = float(np.mean(total_model.predict(Xto_test) == yto_test))
 
     metrics = {
         "home_mae": float(mean_absolute_error(yh_test, home_pred)),

@@ -135,6 +135,38 @@ FEATURE_COLUMNS = [
 ]
 
 
+# Feature columns for the totals over/under classification model.
+# These are the 19 input features used by GradientBoostingClassifier.
+TOTAL_FEATURE_COLUMNS = [
+    # Odds / line features
+    "closing_total",
+    "opening_total",
+    "line_movement",
+    # Pace
+    "home_pace",
+    "away_pace",
+    # Offensive / defensive ratings
+    "home_off_rating",
+    "away_off_rating",
+    "home_def_rating",
+    "away_def_rating",
+    # Shooting rates
+    "home_3p_rate",
+    "away_3p_rate",
+    "home_ft_rate",
+    "away_ft_rate",
+    # Last-5 games offensive rating
+    "last5_home_off_rating",
+    "last5_away_off_rating",
+    # Last-5 games pace
+    "last5_home_pace",
+    "last5_away_pace",
+    # Rest days
+    "rest_days_home",
+    "rest_days_away",
+]
+
+
 def _get_team_games(conn: sqlite3.Connection, team_id: int, before_date: str, limit: int = 20) -> list[dict]:
     rows = conn.execute(
         """
@@ -174,6 +206,11 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
                 feat[col] = 0.0
         feat[f"opp_{prefix}_def_eff"] = 0.0
         feat[f"opp_{prefix}_off_eff"] = 0.0
+        # Total-classifier features
+        feat[f"last5_{prefix}_off_rating"] = 0.0
+        feat[f"last5_{prefix}_pace"] = 0.0
+        feat[f"{prefix}_3p_rate"] = 0.0
+        feat[f"{prefix}_ft_rate"] = 0.0
         return feat
 
     scores = [g["scored"] for g in games]
@@ -206,6 +243,13 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     feat[f"{prefix}_avg_score_last5"] = np.mean([g["scored"] for g in last5])
     feat[f"{prefix}_avg_allowed_last5"] = np.mean([g["allowed"] for g in last5])
     feat[f"{prefix}_margin_last5"] = np.mean([g["margin"] for g in last5])
+
+    # Last-5 offensive rating & pace (for total classifier)
+    last5_avg_score = np.mean([g["scored"] for g in last5])
+    last5_avg_total = np.mean([g["total"] for g in last5]) if last5 else 210.0
+    last5_est_poss = max(last5_avg_total / 2.14, 1)
+    feat[f"last5_{prefix}_off_rating"] = offensive_rating(last5_avg_score, last5_est_poss)
+    feat[f"last5_{prefix}_pace"] = last5_est_poss
 
     # Last 10 games
     last10 = games[:10] if len(games) >= 10 else games
@@ -241,6 +285,15 @@ def _compute_team_features(conn: sqlite3.Connection, team_id: int, opponent_id: 
     m5 = np.mean([g["margin"] for g in last5])
     m10 = np.mean([g["margin"] for g in last10])
     feat[f"{prefix}_margin_trend"] = m5 - m10
+
+    # 3-point rate and free-throw rate approximations.
+    # Box-score-level 3PA/FGA/FTA are not stored in the games table, so we
+    # derive proxies from the team's scoring efficiency relative to league avg.
+    # Higher off_rating → higher 3p_rate; lower → lower.  League averages:
+    # 3P rate ≈ 0.37, FT rate ≈ 0.27.
+    _league_off = 110.0
+    feat[f"{prefix}_3p_rate"] = 0.37 * (off_rtg / _league_off)
+    feat[f"{prefix}_ft_rate"] = 0.27 * (off_rtg / _league_off)
 
     # Opponent efficiency
     if opp_games:
@@ -308,4 +361,81 @@ def build_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
         result[FEATURE_COLUMNS] = result[FEATURE_COLUMNS].fillna(0.0)
     logger.info("Feature count: %d", len(FEATURE_COLUMNS))
     logger.info("Training samples: %d", len(result))
+    return result
+
+
+def build_total_training_frame(db_path: Path = DB_PATH) -> pd.DataFrame:
+    """Build training data for the totals over/under classification model.
+
+    Joins ``games`` with ``predictions_snapshot`` to obtain ``closing_total``
+    (``live_total``) and ``opening_total`` for each game.  Only games that have
+    both a final score **and** stored odds are included.
+
+    Label: 1 if total_score > closing_total, else 0.
+    """
+    conn = sqlite3.connect(db_path)
+
+    # Join games with their most-recent (final) prediction to get odds lines.
+    query = """
+        SELECT g.game_id, g.home_team_id, g.visitor_team_id, g.date,
+               g.home_score, g.visitor_score,
+               p.opening_total, p.live_total
+        FROM games g
+        JOIN predictions_snapshot p ON g.game_id = p.game_id AND p.is_final_prediction = 1
+        WHERE g.status LIKE 'Final%%'
+          AND g.home_score IS NOT NULL AND g.visitor_score IS NOT NULL
+          AND p.live_total IS NOT NULL
+        ORDER BY g.date
+    """
+    games = pd.read_sql_query(query, conn)
+    if games.empty:
+        conn.close()
+        logger.info("Total training frame: 0 samples (no games with odds)")
+        return pd.DataFrame()
+
+    rows: list[dict] = []
+    for r in games.to_dict("records"):
+        home_id = int(r["home_team_id"])
+        away_id = int(r["visitor_team_id"])
+        game_date = str(r["date"])
+        home_score = r.get("home_score") or 0
+        away_score = r.get("visitor_score") or 0
+        closing_total = float(r["live_total"])
+        opening_total_val = float(r["opening_total"]) if r.get("opening_total") is not None else closing_total
+
+        if home_score == 0 and away_score == 0:
+            continue
+
+        total_score = home_score + away_score
+        label = 1 if total_score > closing_total else 0
+
+        home_feat = _compute_team_features(conn, home_id, away_id, game_date, "home")
+        away_feat = _compute_team_features(conn, away_id, home_id, game_date, "away")
+
+        row: dict = {"game_id": r["game_id"]}
+        row.update(home_feat)
+        row.update(away_feat)
+
+        # Odds / line features
+        row["closing_total"] = closing_total
+        row["opening_total"] = opening_total_val
+        row["line_movement"] = closing_total - opening_total_val
+
+        # Map rest day column names to match TOTAL_FEATURE_COLUMNS
+        row["rest_days_home"] = row.get("home_rest_days", 0.0)
+        row["rest_days_away"] = row.get("away_rest_days", 0.0)
+
+        # Target label
+        row["label"] = label
+        rows.append(row)
+
+    conn.close()
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        for col in TOTAL_FEATURE_COLUMNS:
+            if col not in result.columns:
+                result[col] = 0.0
+        result[TOTAL_FEATURE_COLUMNS] = result[TOTAL_FEATURE_COLUMNS].fillna(0.0)
+    logger.info("Total training feature count: %d", len(TOTAL_FEATURE_COLUMNS))
+    logger.info("Total training samples: %d", len(result))
     return result

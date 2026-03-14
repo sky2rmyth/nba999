@@ -141,7 +141,7 @@ FEATURE_COLUMNS = [
 
 
 # Feature columns for the totals over/under classification model.
-# These are the 29 input features used by GradientBoostingClassifier.
+# These are the 28 input features used by GradientBoostingClassifier.
 TOTAL_FEATURE_COLUMNS = [
     # Odds / line features
     "closing_total",

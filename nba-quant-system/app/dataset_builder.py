@@ -18,7 +18,7 @@ from .feature_engineering import _compute_team_features
 
 logger = logging.getLogger(__name__)
 
-# 29 features used by the totals classifier (matches TOTAL_FEATURE_COLUMNS).
+# 28 features used by the totals classifier (matches TOTAL_FEATURE_COLUMNS).
 CLASSIFIER_FEATURES: list[str] = [
     # Odds / line features
     "closing_total",

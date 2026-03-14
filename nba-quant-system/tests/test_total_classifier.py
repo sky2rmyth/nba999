@@ -10,6 +10,8 @@ import pandas as pd
 import pytest
 from sklearn.ensemble import GradientBoostingClassifier
 
+from sklearn.calibration import CalibratedClassifierCV
+
 from app.feature_engineering import (
     TOTAL_FEATURE_COLUMNS,
     build_total_training_frame,
@@ -23,10 +25,10 @@ from app.prediction_models import _build_total_classifier, train_models, FEATURE
 # ---------------------------------------------------------------------------
 
 class TestTotalFeatureColumns:
-    """Verify TOTAL_FEATURE_COLUMNS has the 19 expected features."""
+    """Verify TOTAL_FEATURE_COLUMNS has the 28 expected features."""
 
     def test_total_feature_count(self):
-        assert len(TOTAL_FEATURE_COLUMNS) == 19
+        assert len(TOTAL_FEATURE_COLUMNS) == 28
 
     def test_closing_total_present(self):
         assert "closing_total" in TOTAL_FEATURE_COLUMNS
@@ -40,6 +42,8 @@ class TestTotalFeatureColumns:
     def test_pace_features_present(self):
         assert "home_pace" in TOTAL_FEATURE_COLUMNS
         assert "away_pace" in TOTAL_FEATURE_COLUMNS
+        assert "pace_avg" in TOTAL_FEATURE_COLUMNS
+        assert "pace_diff" in TOTAL_FEATURE_COLUMNS
 
     def test_off_rating_features_present(self):
         assert "home_off_rating" in TOTAL_FEATURE_COLUMNS
@@ -57,17 +61,30 @@ class TestTotalFeatureColumns:
         assert "home_ft_rate" in TOTAL_FEATURE_COLUMNS
         assert "away_ft_rate" in TOTAL_FEATURE_COLUMNS
 
+    def test_off_reb_rate_features_present(self):
+        assert "home_off_reb_rate" in TOTAL_FEATURE_COLUMNS
+        assert "away_off_reb_rate" in TOTAL_FEATURE_COLUMNS
+
     def test_last5_off_rating_features_present(self):
-        assert "last5_home_off_rating" in TOTAL_FEATURE_COLUMNS
-        assert "last5_away_off_rating" in TOTAL_FEATURE_COLUMNS
+        assert "home_last5_off_rating" in TOTAL_FEATURE_COLUMNS
+        assert "away_last5_off_rating" in TOTAL_FEATURE_COLUMNS
 
     def test_last5_pace_features_present(self):
-        assert "last5_home_pace" in TOTAL_FEATURE_COLUMNS
-        assert "last5_away_pace" in TOTAL_FEATURE_COLUMNS
+        assert "home_last5_pace" in TOTAL_FEATURE_COLUMNS
+        assert "away_last5_pace" in TOTAL_FEATURE_COLUMNS
 
     def test_rest_days_features_present(self):
-        assert "rest_days_home" in TOTAL_FEATURE_COLUMNS
-        assert "rest_days_away" in TOTAL_FEATURE_COLUMNS
+        assert "home_rest_days" in TOTAL_FEATURE_COLUMNS
+        assert "away_rest_days" in TOTAL_FEATURE_COLUMNS
+
+    def test_back_to_back_features_present(self):
+        assert "home_back_to_back" in TOTAL_FEATURE_COLUMNS
+        assert "away_back_to_back" in TOTAL_FEATURE_COLUMNS
+
+    def test_interaction_features_present(self):
+        assert "pace_interaction" in TOTAL_FEATURE_COLUMNS
+        assert "off_vs_def_home" in TOTAL_FEATURE_COLUMNS
+        assert "off_vs_def_away" in TOTAL_FEATURE_COLUMNS
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +104,9 @@ class TestBuildTotalClassifier:
 
     def test_model_hyperparameters(self):
         model = _build_total_classifier()
-        assert model.n_estimators == 150
-        assert model.learning_rate == 0.05
-        assert model.max_depth == 5
+        assert model.n_estimators == 300
+        assert model.learning_rate == 0.03
+        assert model.max_depth == 3
         assert model.random_state == 42
 
 
@@ -170,9 +187,11 @@ class TestTotalClassifierIntegration:
                 data[col] = rng.uniform(215, 235, n)
             elif col == "line_movement":
                 data[col] = rng.uniform(-3, 3, n)
-            elif "pace" in col:
+            elif "pace" in col and "interaction" not in col:
                 data[col] = rng.uniform(95, 105, n)
-            elif "off_rating" in col:
+            elif col == "pace_interaction":
+                data[col] = rng.uniform(9000, 11000, n)
+            elif "off_rating" in col or "last5_off" in col:
                 data[col] = rng.uniform(105, 120, n)
             elif "def_rating" in col:
                 data[col] = rng.uniform(105, 120, n)
@@ -180,8 +199,14 @@ class TestTotalClassifierIntegration:
                 data[col] = rng.uniform(0.30, 0.45, n)
             elif "ft_rate" in col:
                 data[col] = rng.uniform(0.20, 0.35, n)
+            elif "off_reb_rate" in col:
+                data[col] = rng.uniform(0.20, 0.30, n)
             elif "rest_days" in col:
                 data[col] = rng.choice([1, 2, 3, 4], n).astype(float)
+            elif "back_to_back" in col:
+                data[col] = rng.choice([0, 1], n).astype(float)
+            elif "off_vs_def" in col:
+                data[col] = rng.uniform(-15, 15, n)
             else:
                 data[col] = rng.uniform(0, 1, n)
         # Label: 1 if a random total > closing_total
@@ -248,7 +273,14 @@ class TestTrainModelsWithTotalDf:
         n = 50
         data = {}
         for col in TOTAL_FEATURE_COLUMNS:
-            data[col] = rng.uniform(0, 1, n)
+            if "pace_interaction" in col:
+                data[col] = rng.uniform(9000, 11000, n)
+            elif "off_vs_def" in col:
+                data[col] = rng.uniform(-15, 15, n)
+            elif "back_to_back" in col:
+                data[col] = rng.choice([0, 1], n).astype(float)
+            else:
+                data[col] = rng.uniform(0, 1, n)
         data["label"] = rng.choice([0, 1], n)
         return pd.DataFrame(data)
 
@@ -262,14 +294,14 @@ class TestTrainModelsWithTotalDf:
         assert bundle.total_model is None
 
     def test_train_with_total_df(self, minimal_df, minimal_total_df):
-        """Training with total_df should produce a GradientBoostingClassifier total_model."""
+        """Training with total_df should produce a CalibratedClassifierCV total_model."""
         with mock.patch("app.prediction_models.database"):
             with mock.patch("app.prediction_models._bump_version", return_value="v99"):
                 with mock.patch("app.prediction_models.MODEL_DIR", Path("/tmp/test_models_with_total")):
                     Path("/tmp/test_models_with_total").mkdir(parents=True, exist_ok=True)
                     bundle = train_models(minimal_df, total_df=minimal_total_df)
         assert bundle.total_model is not None
-        assert isinstance(bundle.total_model, GradientBoostingClassifier)
+        assert isinstance(bundle.total_model, CalibratedClassifierCV)
 
     def test_total_accuracy_in_metrics(self, minimal_df, minimal_total_df):
         """Metrics should contain total_over_accuracy when total_df is provided."""
@@ -337,9 +369,15 @@ class TestComputeTeamFeaturesNewColumns:
         assert "home_ft_rate" in feat
         assert feat["home_ft_rate"] > 0
 
+    def test_off_reb_rate_present(self, mock_db):
+        feat = _compute_team_features(mock_db, 1, 2, "2024-01-25", "home")
+        assert "home_off_reb_rate" in feat
+        assert feat["home_off_reb_rate"] > 0
+
     def test_no_games_returns_zero_defaults(self, mock_db):
         feat = _compute_team_features(mock_db, 999, 2, "2024-01-25", "home")
         assert feat.get("last5_home_off_rating") == 0.0
         assert feat.get("last5_home_pace") == 0.0
         assert feat.get("home_3p_rate") == 0.0
         assert feat.get("home_ft_rate") == 0.0
+        assert feat.get("home_off_reb_rate") == 0.0

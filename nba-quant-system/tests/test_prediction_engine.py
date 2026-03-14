@@ -13,41 +13,41 @@ from app.prediction_engine import (
 
 
 class TestBuildPickIcon:
-    """Test build_pick_icon returns correct icon combinations."""
+    """Test build_pick_icon returns correct icon for core pick."""
 
     def test_core_over(self):
         result = build_pick_icon(True, True, "over")
-        assert result == ICON_CORE + ICON_OVER + "大"
+        assert result == ICON_CORE
 
     def test_core_under(self):
         result = build_pick_icon(True, True, "under")
-        assert result == ICON_CORE + ICON_UNDER + "小"
+        assert result == ICON_CORE
 
     def test_recommend_over(self):
         result = build_pick_icon(False, True, "over")
-        assert result == ICON_RECOMMEND + ICON_OVER + "大"
+        assert result == ""
 
     def test_recommend_under(self):
         result = build_pick_icon(False, True, "under")
-        assert result == ICON_RECOMMEND + ICON_UNDER + "小"
+        assert result == ""
 
     def test_not_recommended(self):
         result = build_pick_icon(False, False, "over")
-        assert result == ICON_NO
+        assert result == ""
 
     def test_not_recommended_under(self):
         result = build_pick_icon(False, False, "under")
-        assert result == ICON_NO
+        assert result == ""
 
     def test_core_takes_priority_over_recommend(self):
-        """When is_core is True, the icon should use ICON_CORE regardless of is_recommend."""
+        """When is_core is True, the icon should use ICON_CORE."""
         result_both = build_pick_icon(True, True, "over")
         result_core_only = build_pick_icon(True, False, "over")
-        assert result_both == result_core_only == ICON_CORE + ICON_OVER + "大"
+        assert result_both == result_core_only == ICON_CORE
 
 
 class TestBuildPredictionTable:
-    """Test build_prediction_table generates correct table format."""
+    """Test build_prediction_table generates correct Chinese table format."""
 
     def _sample_games(self):
         return [
@@ -55,98 +55,78 @@ class TestBuildPredictionTable:
                 "away": "猛龙",
                 "home": "森林狼",
                 "line": 227.5,
-                "pred_total": 233.7,
-                "edge": 6.2,
-                "prob": 0.64,
-                "low": 212.3,
-                "high": 255.8,
-                "direction": "over",
+                "over_prob": 0.642,
+                "under_prob": 0.358,
+                "prediction": "大分",
                 "is_core": True,
-                "is_recommend": True,
             },
             {
                 "away": "独行侠",
                 "home": "魔术",
                 "line": 228.5,
-                "pred_total": 230.4,
-                "edge": 1.9,
-                "prob": 0.58,
-                "low": 208.1,
-                "high": 251.9,
-                "direction": "over",
+                "over_prob": 0.482,
+                "under_prob": 0.518,
+                "prediction": "小分",
                 "is_core": False,
-                "is_recommend": False,
             },
         ]
 
     def test_header_present(self):
         table = build_prediction_table(self._sample_games())
-        assert "比赛 | 盘口 | 模型 | Edge | 概率 | 区间 | 推荐" in table
+        assert "比赛" in table
+        assert "盘口" in table
+        assert "大分概率" in table
+        assert "小分概率" in table
+        assert "模型判断" in table
+        assert "重心" in table
 
-    def test_separator_present(self):
+    def test_table_borders(self):
         table = build_prediction_table(self._sample_games())
-        assert "------------------------------------------------" in table
+        assert "┌" in table
+        assert "┘" in table
+        assert "├" in table
 
     def test_core_game_row(self):
         table = build_prediction_table(self._sample_games())
-        lines = table.split("\n")
-        # Data rows start at index 2 (0=header, 1=separator)
-        core_row = lines[2]
-        assert "猛龙 vs 森林狼" in core_row
-        assert "227.5" in core_row
-        assert "233.7" in core_row
-        assert "+6.2" in core_row
-        assert "64%" in core_row
-        assert "212-255" in core_row
-        assert ICON_CORE in core_row
+        assert "猛龙 vs 森林狼" in table
+        assert "227.5" in table
+        assert "大分" in table
+        assert ICON_CORE in table
 
-    def test_not_recommended_row(self):
+    def test_non_core_game_row(self):
         table = build_prediction_table(self._sample_games())
-        lines = table.split("\n")
-        no_rec_row = lines[3]
-        assert "独行侠 vs 魔术" in no_rec_row
-        assert ICON_NO in no_rec_row
-        assert ICON_CORE not in no_rec_row
-        assert ICON_RECOMMEND not in no_rec_row
+        assert "独行侠 vs 魔术" in table
+        assert "228.5" in table
+        assert "小分" in table
 
     def test_empty_games(self):
         table = build_prediction_table([])
-        assert "比赛 | 盘口 | 模型 | Edge | 概率 | 区间 | 推荐" in table
-        # Only header + separator, no data rows
+        assert "比赛" in table
+        assert "盘口" in table
+        # Only borders + header, no data rows
         lines = table.split("\n")
-        assert len(lines) == 2
+        assert len(lines) == 4  # top border + header + mid border + bottom border
 
     def test_all_games_present(self):
         games = self._sample_games()
         table = build_prediction_table(games)
         lines = table.split("\n")
-        # 2 header lines + 2 data rows
-        assert len(lines) == 4
+        # 3 border/header lines + 2 data rows + 1 bottom border
+        assert len(lines) == 6
 
-    def test_negative_edge_format(self):
+    def test_negative_prob_format(self):
         games = [{
             "away": "爵士",
             "home": "奇才",
             "line": 243.5,
-            "pred_total": 229.6,
-            "edge": -13.9,
-            "prob": 0.59,
-            "low": 213.0,
-            "high": 246.0,
-            "direction": "under",
+            "over_prob": 0.41,
+            "under_prob": 0.59,
+            "prediction": "小分",
             "is_core": False,
-            "is_recommend": True,
         }]
         table = build_prediction_table(games)
-        assert "-13.9" in table
-        assert ICON_RECOMMEND + ICON_UNDER + "小" in table
-
-    def test_pipe_separators(self):
-        """All data rows use pipe separators."""
-        table = build_prediction_table(self._sample_games())
-        lines = table.split("\n")
-        for line in lines[2:]:
-            assert line.count("|") == 6
+        assert "小分" in table
+        assert "爵士 vs 奇才" in table
 
 
 class TestRecommendationReason:
@@ -249,316 +229,109 @@ class TestSignalScore:
 
 
 class TestCorePick:
-    """Test that recommendation uses edge-only filtering with max 5 cap."""
+    """Test that recommendation uses confidence-based sorting with core pick rule."""
 
     @staticmethod
-    def _apply_recommendation(results, max_recs=5):
-        """Mirror the recommendation logic from prediction_engine."""
-        sorted_results = sorted(results, key=lambda x: abs(x["total_edge_pts"]), reverse=True)
+    def _apply_recommendation(results):
+        """Mirror the new recommendation logic from prediction_engine.
 
-        # Determine minimum recommendations based on game count
-        total_games = len(sorted_results)
-        if total_games >= 5:
-            min_recommend = 4
-        elif total_games == 4:
-            min_recommend = 3
-        else:
-            min_recommend = 1
-
-        for gr in sorted_results:
-            abs_edge_val = abs(gr["total_edge_pts"])
-            if abs_edge_val >= 4:
-                gr["recommended"] = True
-            else:
-                gr["recommended"] = False
-            if abs_edge_val >= 7:
-                gr["star_pick"] = True
-            else:
-                gr["star_pick"] = False
+        Sort by confidence = abs(prob_over - 0.5) descending.
+        Core pick: max confidence game with max(over_prob, under_prob) >= 0.60.
+        """
+        for gr in results:
+            gr["confidence"] = abs(gr["over_probability"] - 0.5)
             gr["is_core"] = False
 
-        # Collect quality-filtered recommendations
-        recommended_games = [gr for gr in sorted_results if gr["recommended"]]
+        sorted_results = sorted(results, key=lambda x: x["confidence"], reverse=True)
 
-        # Auto-fill if recommendations below minimum
-        if len(recommended_games) < min_recommend:
-            for gr in sorted_results:
-                if not gr["recommended"]:
-                    gr["recommended"] = True
-                    recommended_games.append(gr)
-                if len(recommended_games) >= min_recommend:
-                    break
-
-        # Cap recommendations at max_recs by abs(edge)
-        if len(recommended_games) > max_recs:
-            recommended_games = sorted(
-                recommended_games, key=lambda x: abs(x["total_edge_pts"]), reverse=True
-            )[:max_recs]
-            keep_indices = {g["idx"] for g in recommended_games}
-            for gr in sorted_results:
-                if gr["recommended"] and gr["idx"] not in keep_indices:
-                    gr["recommended"] = False
-
-        # Guaranteed core pick: prefer star_pick with largest abs(edge)
-        star_results = [gr for gr in sorted_results if gr["recommended"] and gr["star_pick"]]
-        if star_results:
-            star_results[0]["is_core"] = True
-        else:
-            rec_sorted = sorted(
-                [gr for gr in sorted_results if gr["recommended"]],
-                key=lambda x: abs(x["total_edge_pts"]),
-                reverse=True,
-            )
-            if rec_sorted:
-                rec_sorted[0]["star_pick"] = True
-                rec_sorted[0]["is_core"] = True
+        # Core pick: max confidence where max(over_prob, under_prob) >= 0.60
+        for gr in sorted_results:
+            max_prob = max(gr["over_probability"], gr["under_probability"])
+            if max_prob >= 0.60:
+                gr["is_core"] = True
+                break
         return sorted_results
 
     def test_single_core_pick(self):
         results = [
-            {"idx": 0, "signal_score": 20.0, "total_edge_pts": 7.0,
-             "over_probability": 0.65, "under_probability": 0.35},
-            {"idx": 1, "signal_score": 30.0, "total_edge_pts": 9.0,
-             "over_probability": 0.68, "under_probability": 0.32},
-            {"idx": 2, "signal_score": 25.0, "total_edge_pts": 3.0,
-             "over_probability": 0.55, "under_probability": 0.45},
+            {"idx": 0, "over_probability": 0.65, "under_probability": 0.35},
+            {"idx": 1, "over_probability": 0.68, "under_probability": 0.32},
+            {"idx": 2, "over_probability": 0.55, "under_probability": 0.45},
         ]
         sorted_results = self._apply_recommendation(results)
-        # idx=1 has abs(edge)=9 >= 7 → star_pick + recommended, should be core
-        assert sorted_results[0]["idx"] == 1
-        assert sorted_results[0]["is_core"] is True
+        core = [r for r in sorted_results if r["is_core"]]
+        assert len(core) == 1
+        # idx=1 has highest confidence (|0.68-0.5|=0.18) and prob >= 0.60
+        assert core[0]["idx"] == 1
 
-    def test_single_game_with_edge_7_is_star_and_core(self):
-        """Edge=7 → star_pick (>= 7) and core (guaranteed core pick)."""
-        results = [{"idx": 0, "signal_score": 15.0, "total_edge_pts": 7.0,
-                     "over_probability": 0.65, "under_probability": 0.35}]
-        sorted_results = self._apply_recommendation(results)
-        assert sorted_results[0]["is_core"] is True
-        assert sorted_results[0]["recommended"] is True
-        assert sorted_results[0]["star_pick"] is True
-
-    def test_no_recommendation_when_edges_small(self):
-        """When no game meets edge >= 4, auto-fill ensures minimum recommendations."""
+    def test_core_requires_prob_060(self):
+        """Core pick requires probability >= 0.60."""
         results = [
-            {"idx": 0, "signal_score": 20.0, "total_edge_pts": 3.0,
-             "over_probability": 0.55, "under_probability": 0.45},
-            {"idx": 1, "signal_score": 25.0, "total_edge_pts": 3.5,
-             "over_probability": 0.58, "under_probability": 0.42},
+            {"idx": 0, "over_probability": 0.55, "under_probability": 0.45},
+            {"idx": 1, "over_probability": 0.52, "under_probability": 0.48},
         ]
         sorted_results = self._apply_recommendation(results)
-        recommended = [r for r in sorted_results if r["recommended"]]
-        # 2 games → min_recommend = 1, auto-fill kicks in
-        assert len(recommended) >= 1
+        core = [r for r in sorted_results if r["is_core"]]
+        # No game has prob >= 0.60, so no core pick
+        assert len(core) == 0
+
+    def test_no_core_when_all_below_060(self):
+        """When no game has probability >= 0.60, there is no core pick."""
+        results = [
+            {"idx": 0, "over_probability": 0.58, "under_probability": 0.42},
+            {"idx": 1, "over_probability": 0.53, "under_probability": 0.47},
+        ]
+        sorted_results = self._apply_recommendation(results)
+        core = [r for r in sorted_results if r["is_core"]]
+        assert len(core) == 0
 
     def test_empty_results_no_core(self):
         results = []
         sorted_results = self._apply_recommendation(results)
         assert len(sorted_results) == 0
 
-    def test_recommendation_requires_edge_only(self):
-        """Edge-only filter: abs(edge) >= 4 → recommended. All 3 games meet filter."""
+    def test_sorted_by_confidence(self):
+        """Games should be sorted by confidence descending."""
         results = [
-            {"idx": 0, "total_edge_pts": 6.0,
-             "over_probability": 0.62, "under_probability": 0.38, "signal_score": 20.0},
-            {"idx": 1, "total_edge_pts": 6.0,
-             "over_probability": 0.55, "under_probability": 0.45, "signal_score": 18.0},
-            {"idx": 2, "total_edge_pts": 4.0,
-             "over_probability": 0.70, "under_probability": 0.30, "signal_score": 22.0},
+            {"idx": 0, "over_probability": 0.55, "under_probability": 0.45},  # conf=0.05
+            {"idx": 1, "over_probability": 0.70, "under_probability": 0.30},  # conf=0.20
+            {"idx": 2, "over_probability": 0.62, "under_probability": 0.38},  # conf=0.12
         ]
         sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        # 3 games -> all 3 have abs(edge) >= 4, all recommended
-        assert len(recommended) == 3
-
-    def test_negative_edge_also_recommends(self):
-        """Negative edge with abs >= 4 should be recommended."""
-        results = [
-            {"idx": 0, "signal_score": 30.0, "total_edge_pts": -7.0,
-             "over_probability": 0.35, "under_probability": 0.65},
-            {"idx": 1, "signal_score": 20.0, "total_edge_pts": 3.0,
-             "over_probability": 0.55, "under_probability": 0.45},
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert any(r["idx"] == 0 for r in recommended)
-        # Guaranteed core: idx=0 is promoted since it has the largest abs(edge)
-        core = [r for r in sorted_results if r["is_core"]]
-        assert len(core) == 1
-        assert core[0]["idx"] == 0
-
-    def test_max_5_recommendations_caps_from_top_abs_edge(self):
-        """When more than 5 games qualify, only top 5 by abs(edge) are kept."""
-        results = [
-            {"idx": i, "total_edge_pts": float(10 - i), "signal_score": 20.0,
-             "over_probability": 0.65, "under_probability": 0.35}
-            for i in range(7)
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) == 5
-        # Top 5 by abs(edge): idx=0(10), idx=1(9), idx=2(8), idx=3(7), idx=4(6)
-        rec_ids = {r["idx"] for r in recommended}
-        assert rec_ids == {0, 1, 2, 3, 4}
-
-    def test_core_pick_is_star_pick_with_max_abs_edge(self):
-        """Core pick should be the star_pick game with the largest abs(edge)."""
-        results = [
-            {"idx": 0, "total_edge_pts": -12.0, "signal_score": 25.0,
-             "over_probability": 0.30, "under_probability": 0.70},
-            {"idx": 1, "total_edge_pts": 9.0, "signal_score": 30.0,
-             "over_probability": 0.68, "under_probability": 0.32},
-            {"idx": 2, "total_edge_pts": 6.0, "signal_score": 20.0,
-             "over_probability": 0.62, "under_probability": 0.38},
-        ]
-        sorted_results = self._apply_recommendation(results)
-        core = [r for r in sorted_results if r["is_core"]]
-        assert len(core) == 1
-        assert core[0]["idx"] == 0  # abs(-12) = 12 >= 7 → star_pick + core
-
-    def test_star_pick_requires_edge_7(self):
-        """Star pick needs abs(edge) >= 7 (edge-only, no prob condition)."""
-        results = [
-            {"idx": 0, "total_edge_pts": 5.0, "signal_score": 25.0,
-             "over_probability": 0.63, "under_probability": 0.37},  # edge < 7
-            {"idx": 1, "total_edge_pts": 6.5, "signal_score": 20.0,
-             "over_probability": 0.68, "under_probability": 0.32},  # edge < 7
-            {"idx": 2, "total_edge_pts": 10.0, "signal_score": 30.0,
-             "over_probability": 0.70, "under_probability": 0.30},  # edge >= 7 → star_pick
-        ]
-        sorted_results = self._apply_recommendation(results)
-        star_picks = [r for r in sorted_results if r.get("star_pick")]
-        assert len(star_picks) == 1
-        assert star_picks[0]["idx"] == 2
-
-    def test_no_core_when_no_star_pick(self):
-        """When no game meets star_pick criteria, a core pick is still promoted from recommended."""
-        results = [
-            {"idx": 0, "total_edge_pts": 6.0, "signal_score": 20.0,
-             "over_probability": 0.62, "under_probability": 0.38},
-            {"idx": 1, "total_edge_pts": 5.5, "signal_score": 18.0,
-             "over_probability": 0.61, "under_probability": 0.39},
-        ]
-        sorted_results = self._apply_recommendation(results)
-        core = [r for r in sorted_results if r["is_core"]]
-        # Guaranteed core pick — promoted from recommended with largest abs(edge)
-        assert len(core) == 1
-        assert core[0]["idx"] == 0
-
-    def test_fill_to_minimum_when_insufficient(self):
-        """When quality filter yields 0 recommendations, auto-fill ensures minimum."""
-        results = [
-            {"idx": 0, "total_edge_pts": 3.0, "signal_score": 15.0,
-             "over_probability": 0.55, "under_probability": 0.45},
-            {"idx": 1, "total_edge_pts": 2.0, "signal_score": 10.0,
-             "over_probability": 0.52, "under_probability": 0.48},
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        # 2 games → min_recommend = 1, auto-fill kicks in
-        assert len(recommended) >= 1
-
-    def test_edge_10_is_star_pick_and_core(self):
-        """Edge=10 >= 7 → star_pick + recommended + core."""
-        results = [
-            {"idx": 0, "total_edge_pts": 10.0, "signal_score": 25.0,
-             "over_probability": 0.62, "under_probability": 0.38},
-        ]
-        sorted_results = self._apply_recommendation(results)
-        assert sorted_results[0]["recommended"] is True
-        assert sorted_results[0]["star_pick"] is True
-        assert sorted_results[0]["is_core"] is True
+        assert sorted_results[0]["idx"] == 1
+        assert sorted_results[1]["idx"] == 2
+        assert sorted_results[2]["idx"] == 0
 
     def test_only_one_core_pick(self):
         """Even when multiple games meet core criteria, only 1 is marked."""
         results = [
-            {"idx": 0, "total_edge_pts": 10.0, "signal_score": 30.0,
-             "over_probability": 0.70, "under_probability": 0.30},
-            {"idx": 1, "total_edge_pts": 9.0, "signal_score": 28.0,
-             "over_probability": 0.68, "under_probability": 0.32},
+            {"idx": 0, "over_probability": 0.70, "under_probability": 0.30},
+            {"idx": 1, "over_probability": 0.68, "under_probability": 0.32},
+            {"idx": 2, "over_probability": 0.65, "under_probability": 0.35},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
         assert len(core) == 1
-        assert core[0]["idx"] == 0  # abs(10) > abs(9)
+        assert core[0]["idx"] == 0  # highest confidence
 
-    def test_min_recommend_4_when_5_or_more_games(self):
-        """With >= 5 games, min_recommend = 4. Auto-fill if quality filter yields fewer."""
+    def test_under_prob_can_be_core(self):
+        """Under probability >= 0.60 should also qualify for core."""
         results = [
-            {"idx": i, "total_edge_pts": float(2 + i * 0.5), "signal_score": 10.0,
-             "over_probability": 0.53, "under_probability": 0.47}
-            for i in range(6)
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) >= 4
-
-    def test_min_recommend_4_when_exactly_5_games(self):
-        """With exactly 5 games, min_recommend = 4."""
-        results = [
-            {"idx": i, "total_edge_pts": float(2 + i * 0.5), "signal_score": 10.0,
-             "over_probability": 0.53, "under_probability": 0.47}
-            for i in range(5)
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) >= 4
-
-    def test_min_recommend_3_when_4_games(self):
-        """With exactly 4 games, min_recommend = 3. Auto-fill if quality filter yields fewer."""
-        results = [
-            {"idx": i, "total_edge_pts": float(2 + i), "signal_score": 10.0,
-             "over_probability": 0.53, "under_probability": 0.47}
-            for i in range(4)
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) >= 3
-
-    def test_min_recommend_1_when_3_games_or_fewer(self):
-        """With <= 3 games, min_recommend = 1. Auto-fill if quality filter yields 0."""
-        results = [
-            {"idx": 0, "total_edge_pts": 1.0, "signal_score": 5.0,
-             "over_probability": 0.51, "under_probability": 0.49},
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) >= 1
-
-    def test_min_recommend_1_when_3_games(self):
-        """With exactly 3 games, min_recommend = 1 (not 3)."""
-        results = [
-            {"idx": i, "total_edge_pts": float(1 + i * 0.5), "signal_score": 5.0,
-             "over_probability": 0.52, "under_probability": 0.48}
-            for i in range(3)
-        ]
-        sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) >= 1
-
-    def test_guaranteed_core_pick_always_exists(self):
-        """Every non-empty result set must have exactly 1 core pick."""
-        results = [
-            {"idx": 0, "total_edge_pts": 1.5, "signal_score": 5.0,
-             "over_probability": 0.52, "under_probability": 0.48},
-            {"idx": 1, "total_edge_pts": 2.0, "signal_score": 6.0,
-             "over_probability": 0.53, "under_probability": 0.47},
-            {"idx": 2, "total_edge_pts": 1.0, "signal_score": 4.0,
-             "over_probability": 0.51, "under_probability": 0.49},
+            {"idx": 0, "over_probability": 0.35, "under_probability": 0.65},
+            {"idx": 1, "over_probability": 0.55, "under_probability": 0.45},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
         assert len(core) == 1
+        assert core[0]["idx"] == 0  # under_prob=0.65 >= 0.60
 
-    def test_cap_at_5_with_many_qualifying_games(self):
-        """When many games qualify, cap at max 5 recommendations."""
+    def test_confidence_calculation(self):
+        """Confidence = abs(prob_over - 0.5)."""
         results = [
-            {"idx": i, "total_edge_pts": float(12 - i), "signal_score": 30.0,
-             "over_probability": 0.70, "under_probability": 0.30}
-            for i in range(10)
+            {"idx": 0, "over_probability": 0.62, "under_probability": 0.38},
         ]
         sorted_results = self._apply_recommendation(results)
-        recommended = [gr for gr in sorted_results if gr["recommended"]]
-        assert len(recommended) == 5
+        assert abs(sorted_results[0]["confidence"] - 0.12) < 0.001
 
 
 class TestEdgeCalculation:

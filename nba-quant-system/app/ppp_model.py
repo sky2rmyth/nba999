@@ -38,15 +38,10 @@ def calculate_ppp(
     tuple[float, float]
         ``(ppp_home, ppp_away)``
     """
-    ppp_home = (home_off_rating + away_def_rating) / 200
-    ppp_away = (away_off_rating + home_def_rating) / 200
+    league_ppp = 1.12
 
-    # Shooting structure correction
-    ppp_home *= 1 + home_3p_rate * 0.12
-    ppp_home *= 1 + home_ft_rate * 0.06
-
-    ppp_away *= 1 + away_3p_rate * 0.12
-    ppp_away *= 1 + away_ft_rate * 0.06
+    ppp_home = (home_off_rating / away_def_rating) * league_ppp
+    ppp_away = (away_off_rating / home_def_rating) * league_ppp
 
     ppp_home = max(1.02, min(ppp_home, 1.18))
     ppp_away = max(1.02, min(ppp_away, 1.18))

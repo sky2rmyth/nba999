@@ -47,8 +47,7 @@ def run_total_simulation(
     seed = int(game_id) % 1_000_000
     rng = np.random.default_rng(seed)
 
-    # Dynamic standard deviation
-    std = 10 + abs(pace_diff) * 0.6 + abs(ppp_home - ppp_away) * 4
+    std = 10
 
     simulated_totals = rng.normal(predicted_total, std, n_sim)
 

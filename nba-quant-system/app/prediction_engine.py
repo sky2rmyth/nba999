@@ -4,71 +4,32 @@ import logging
 import sys
 from datetime import datetime
 
-import numpy as np
 import pandas as pd
 from wcwidth import wcswidth
 
 from .api_client import BallDontLieClient
-from .bookmaker_behavior import analyze_line_behavior
 from .database import get_conn, insert_prediction
 from .data_pipeline import bootstrap_historical_data, sync_date_games, fetch_player_injuries
 from .feature_engineering import (
-    FEATURE_COLUMNS, TOTAL_FEATURE_COLUMNS,
-    _compute_team_features, calculate_game_pace, calculate_ppp,
-    calculate_three_point_rate, calculate_free_throw_rate,
-    calculate_orb_rate, calculate_tov_rate,
+    FEATURE_COLUMNS,
+    _compute_team_features,
 )
-from .game_simulator import run_possession_simulation
+from .injury_model import adjust_for_injuries
+from .market_model import apply_market_calibration
 from .odds_provider import fetch_today_odds, extract_opening_line, extract_live_line
 from .odds_tracker import parse_main_market, store_opening_and_live
+from .pace_model import calculate_game_pace as pace_model_calc
+from .ppp_model import calculate_ppp as ppp_model_calc
 from .prediction_models import MODEL_DIR, MODEL_FILES
-from .rating_engine import (
-    compute_spread_rating, compute_total_rating,
-    compute_edge_score, stars_display,
-)
 from .retrain_engine import ensure_models
+from .simulation_engine import run_total_simulation
 from .team_translation import zh_name
 from .telegram_bot import send_message, ProgressTracker
+from .total_model import calculate_predicted_total
 
 logger = logging.getLogger(__name__)
 
 MIN_SIMULATION_COUNT = 10000
-
-# Hybrid model blending weights: Monte Carlo simulation vs classifier model.
-# MC simulation captures game-specific dynamics; classifier captures historical patterns.
-MC_WEIGHT = 0.6
-CLASSIFIER_WEIGHT = 0.4
-
-# Blending weights for last-10 games vs full-season ratings (stability improvement)
-RECENT_WEIGHT = 0.6
-SEASON_WEIGHT = 0.4
-
-# Blending weights for ML prediction vs rating-based prediction
-ML_WEIGHT = 0.7
-RATING_WEIGHT = 0.3
-
-# Minimum pace divisor to avoid division by zero in rating calculations
-MIN_PACE_DIVISOR = 80
-
-# Probability calibration: shrink raw probability toward neutral (0.5)
-PROB_RAW_WEIGHT = 0.7
-PROB_NEUTRAL_WEIGHT = 0.3
-NEUTRAL_PROBABILITY = 0.5
-
-# Injury adjustment: reduce offensive rating when a team has player(s) ruled out
-INJURY_RATING_FACTOR = 0.96
-
-# Monte Carlo simulation standard deviation for total
-MC_TOTAL_STD = 8.5
-
-# League average total for bias calibration
-LEAGUE_AVG_TOTAL = 229
-
-# League-average rate constants for possession-based efficiency adjustment
-LEAGUE_AVG_THREE_POINT_RATE = 0.37
-LEAGUE_AVG_FREE_THROW_RATE = 0.27
-LEAGUE_AVG_ORB_RATE = 0.25
-LEAGUE_AVG_TOV_RATE = 0.13
 
 ICON_CORE = "⭐"
 ICON_RECOMMEND = "✅"
@@ -200,7 +161,7 @@ def _build_prediction_features(home_id: int, away_id: int) -> pd.DataFrame:
     for col in FEATURE_COLUMNS:
         if col not in feat.columns:
             feat[col] = 0.0
-    # Keep all columns; callers select FEATURE_COLUMNS or TOTAL_FEATURE_COLUMNS as needed.
+    # Keep all columns; callers select FEATURE_COLUMNS as needed.
     return feat
 
 
@@ -326,315 +287,127 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("  Opening Total: %s", opening_total)
         logger.info("  Live Total: %s", live_total)
 
-        # --- Build features and predict scores ---
+        # --- Build features ---
         feat = _build_prediction_features(home["id"], vis["id"])
-
-        predicted_home_score = float(model_bundle.home_score_model.predict(feat[FEATURE_COLUMNS])[0])
-        predicted_away_score = float(model_bundle.away_score_model.predict(feat[FEATURE_COLUMNS])[0])
-
-        # --- Model input upgrade: blend last-10 and season ratings ---
         feat_row = feat.iloc[0]
-        season_home_off = float(feat_row.get("home_off_rating", 110.0))
-        season_away_off = float(feat_row.get("away_off_rating", 110.0))
-        season_home_def = float(feat_row.get("home_def_rating", 110.0))
-        season_away_def = float(feat_row.get("away_def_rating", 110.0))
-        season_home_pace = float(feat_row.get("home_pace", 98.0))
-        season_away_pace = float(feat_row.get("away_pace", 98.0))
 
-        home_avg10 = float(feat_row.get("home_avg_score_last10", predicted_home_score))
-        home_allowed10 = float(feat_row.get("home_avg_allowed_last10", predicted_away_score))
-        away_avg10 = float(feat_row.get("away_avg_score_last10", predicted_away_score))
-        away_allowed10 = float(feat_row.get("away_avg_allowed_last10", predicted_home_score))
-
-        last10_home_pace = (home_avg10 + home_allowed10) / 2.14
-        last10_away_pace = (away_avg10 + away_allowed10) / 2.14
-
-        last10_home_off = (home_avg10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
-        last10_away_off = (away_avg10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0
-        last10_home_def = (home_allowed10 / max(last10_home_pace, MIN_PACE_DIVISOR)) * 100.0
-        last10_away_def = (away_allowed10 / max(last10_away_pace, MIN_PACE_DIVISOR)) * 100.0
-
-        # Blended ratings: 0.6 last-10 + 0.4 season
-        home_off = RECENT_WEIGHT * last10_home_off + SEASON_WEIGHT * season_home_off
-        away_off = RECENT_WEIGHT * last10_away_off + SEASON_WEIGHT * season_away_off
-        home_def = RECENT_WEIGHT * last10_home_def + SEASON_WEIGHT * season_home_def
-        away_def = RECENT_WEIGHT * last10_away_def + SEASON_WEIGHT * season_away_def
-
-        home_pace_blend = 0.7 * last10_home_pace + 0.3 * season_home_pace
-        away_pace_blend = 0.7 * last10_away_pace + 0.3 * season_away_pace
-
-        # Injury adjustment: reduce off_rating when team has player(s) ruled out
-        if home["id"] in teams_with_star_out:
-            home_off *= INJURY_RATING_FACTOR
-            logger.info("Injury adjustment applied: %s off_rating * %.2f", home["full_name"], INJURY_RATING_FACTOR)
-        if vis["id"] in teams_with_star_out:
-            away_off *= INJURY_RATING_FACTOR
-            logger.info("Injury adjustment applied: %s off_rating * %.2f", vis["full_name"], INJURY_RATING_FACTOR)
-
-        # Game pace via matchup pace formula (0.55 * fast + 0.45 * slow)
-        game_pace = calculate_game_pace(home_pace_blend, away_pace_blend)
-
-        # PPP derived from (possibly injury-adjusted) off_rating
-        home_ppp = calculate_ppp(home_off)
-        away_ppp = calculate_ppp(away_off)
-
-        # PPP safety limits
-        home_ppp = max(1.03, min(home_ppp, 1.18))
-        away_ppp = max(1.03, min(away_ppp, 1.18))
-
-        # Final predicted total from possession model (before market anchor)
-        model_total = game_pace * (home_ppp + away_ppp)
-
-        # Keep ML-based margin for spread analysis
-        predicted_margin = predicted_home_score - predicted_away_score
-
-        logger.info("Predicted Home Score: %.1f  Away Score: %.1f", predicted_home_score, predicted_away_score)
-        logger.info("Predicted Margin: %.1f  Model Total: %.1f", predicted_margin, model_total)
+        # --- Extract ratings and pace from features ---
+        home_off_rating = float(feat_row.get("home_off_rating", 110.0))
+        away_off_rating = float(feat_row.get("away_off_rating", 110.0))
+        home_def_rating = float(feat_row.get("home_def_rating", 110.0))
+        away_def_rating = float(feat_row.get("away_def_rating", 110.0))
+        home_pace_val = float(feat_row.get("home_pace", 98.0))
+        away_pace_val = float(feat_row.get("away_pace", 98.0))
+        home_3p = float(feat_row.get("home_3p_rate", 0.37))
+        away_3p = float(feat_row.get("away_3p_rate", 0.37))
+        home_ft = float(feat_row.get("home_ft_rate", 0.27))
+        away_ft = float(feat_row.get("away_ft_rate", 0.27))
+        home_b2b = bool(feat_row.get("home_b2b", 0.0))
+        away_b2b = bool(feat_row.get("away_b2b", 0.0))
 
         # --- Skip games without valid odds ---
         if odds_source == "NONE":
             logger.warning("Odds Source: NONE (game %s) – skipping game (no line available)", game_id)
             continue
 
-        # --- Market Anchor: blend model total with closing line ---
-        predicted_total = 0.65 * model_total + 0.35 * live_total
-
-        # --- Debug output ---
-        total_edge_debug = predicted_total - live_total
-        print("====== MODEL DEBUG ======")
-        print("Game Pace:", game_pace)
-        print("Home PPP:", home_ppp)
-        print("Away PPP:", away_ppp)
-        print("Predicted Total:", predicted_total)
-        print("Closing Line:", live_total)
-        print("Edge:", total_edge_debug)
-        print("=========================")
-
-        # --- Hybrid: Spread Cover & Total model predictions ---
-        spread_cover_prob_model = None
-        total_over_prob_model = None
-        if model_bundle.spread_cover_model is not None:
-            try:
-                spread_cover_prob_model = float(model_bundle.spread_cover_model.predict_proba(feat[FEATURE_COLUMNS])[0][1])
-                logger.info("Spread Cover Model Prob: %.2f%%", spread_cover_prob_model * 100)
-            except Exception:
-                pass
-
-        # --- Total classifier: build feature vector with TOTAL_FEATURE_COLUMNS ---
-        if model_bundle.total_model is not None and live_total is not None:
-            try:
-                feat_row = feat.iloc[0]
-                hp_val = float(feat_row.get("home_pace", 98.0))
-                ap_val = float(feat_row.get("away_pace", 98.0))
-                home_off_val = float(feat_row.get("home_off_rating", 110.0))
-                away_off_val = float(feat_row.get("away_off_rating", 110.0))
-                home_def_val = float(feat_row.get("home_def_rating", 110.0))
-                away_def_val = float(feat_row.get("away_def_rating", 110.0))
-                total_feat_row = {
-                    "closing_total": live_total,
-                    "opening_total": opening_total if opening_total is not None else live_total,
-                    "line_movement": (live_total - opening_total) if opening_total is not None else 0.0,
-                    "home_pace": hp_val,
-                    "away_pace": ap_val,
-                    "pace_avg": (hp_val + ap_val) / 2.0,
-                    "pace_diff": hp_val - ap_val,
-                    "home_off_rating": home_off_val,
-                    "away_off_rating": away_off_val,
-                    "home_def_rating": home_def_val,
-                    "away_def_rating": away_def_val,
-                    "home_3p_rate": float(feat_row.get("home_3p_rate", 0.37)),
-                    "away_3p_rate": float(feat_row.get("away_3p_rate", 0.37)),
-                    "home_ft_rate": float(feat_row.get("home_ft_rate", 0.27)),
-                    "away_ft_rate": float(feat_row.get("away_ft_rate", 0.27)),
-                    "home_off_reb_rate": float(feat_row.get("home_off_reb_rate", 0.25)),
-                    "away_off_reb_rate": float(feat_row.get("away_off_reb_rate", 0.25)),
-                    "home_last5_pace": float(feat_row.get("last5_home_pace", 98.0)),
-                    "away_last5_pace": float(feat_row.get("last5_away_pace", 98.0)),
-                    "home_last5_off_rating": float(feat_row.get("last5_home_off_rating", 110.0)),
-                    "away_last5_off_rating": float(feat_row.get("last5_away_off_rating", 110.0)),
-                    "home_rest_days": float(feat_row.get("home_rest_days", 2.0)),
-                    "away_rest_days": float(feat_row.get("away_rest_days", 2.0)),
-                    "home_back_to_back": float(feat_row.get("home_b2b", 0.0)),
-                    "away_back_to_back": float(feat_row.get("away_b2b", 0.0)),
-                    "pace_interaction": hp_val * ap_val,
-                    "off_vs_def_home": home_off_val - away_def_val,
-                    "off_vs_def_away": away_off_val - home_def_val,
-                }
-                total_feat_df = pd.DataFrame([total_feat_row])[TOTAL_FEATURE_COLUMNS]
-                total_over_prob_model = float(model_bundle.total_model.predict_proba(total_feat_df)[0][1])
-            except Exception:
-                logger.debug("Total classifier prediction failed", exc_info=True)
-
-        # --- Total classifier output & prediction rule ---
-        if total_over_prob_model is not None:
-            prob_over = total_over_prob_model
-            prob_under = 1.0 - prob_over
-            if prob_over > 0.5:
-                total_prediction = "Over"
-                total_pick = "大分"
-            else:
-                total_prediction = "Under"
-                total_pick = "小分"
-
-            logger.info("Predicted Over Probability: %.2f%%", prob_over * 100)
-            logger.info("Predicted Under Probability: %.2f%%", prob_under * 100)
-            logger.info("Prediction: %s", total_prediction)
-            logger.info("Closing Line: %.1f", live_total)
-            logger.info("Actual Result: pending")
-
-            print("====== TOTAL CLASSIFIER ======")
-            print("Predicted Over Probability:", round(prob_over, 4))
-            print("Predicted Under Probability:", round(prob_under, 4))
-            print("Prediction:", total_prediction)
-            print("Closing Line:", live_total)
-            print("Actual Result: pending")
-            print("==============================")
-        else:
-            prob_over = None
-            prob_under = None
-            total_prediction = None
-
-        # --- Step 4: Monte Carlo simulation ---
-        sim = run_possession_simulation(
-            game_id=game_id,
-            game_pace=game_pace,
-            home_adj_ppp=home_ppp,
-            away_adj_ppp=away_ppp,
-            predicted_total=predicted_total,
-            closing_total=live_total,
-            spread_line=live_spread,
-            n_sim=MIN_SIMULATION_COUNT,
-            total_std=MC_TOTAL_STD,
+        # --- Module 1: Pace Model ---
+        pace_diff = home_pace_val - away_pace_val
+        game_pace = pace_model_calc(
+            home_pace_val, away_pace_val,
+            home_back_to_back=home_b2b,
+            away_back_to_back=away_b2b,
         )
 
-        print("Simulation Low:", sim["simulation_low"])
-        print("Simulation High:", sim["simulation_high"])
-        print("Simulation Std:", sim["total_std"])
-        print("Over Probability:", sim["over_probability"])
-        print("Under Probability:", sim["under_probability"])
+        # --- Module 2: PPP Model ---
+        home_ppp, away_ppp = ppp_model_calc(
+            home_off_rating, away_off_rating,
+            home_def_rating, away_def_rating,
+            home_3p, away_3p,
+            home_ft, away_ft,
+        )
+
+        # --- Module 3: Injury Model ---
+        home_scorer_out = home["id"] in teams_with_star_out
+        away_scorer_out = vis["id"] in teams_with_star_out
+        home_ppp, away_ppp, game_pace = adjust_for_injuries(
+            home_ppp, away_ppp, game_pace,
+            home_scorer_out=home_scorer_out,
+            away_scorer_out=away_scorer_out,
+        )
+        if home_scorer_out:
+            logger.info("Injury adjustment applied: %s PPP -= 0.04", home["full_name"])
+        if away_scorer_out:
+            logger.info("Injury adjustment applied: %s PPP -= 0.04", vis["full_name"])
+
+        # --- Module 4: Total Calculation ---
+        predicted_total = calculate_predicted_total(game_pace, home_ppp, away_ppp)
+
+        # --- Module 5: Market Calibration ---
+        ot = opening_total if opening_total is not None else live_total
+        predicted_total = apply_market_calibration(predicted_total, ot, live_total)
+
+        # --- Debug output ---
+        print("====== MODEL DEBUG ======")
+        print("Game Pace:", round(game_pace, 2))
+        print("Home PPP:", round(home_ppp, 4))
+        print("Away PPP:", round(away_ppp, 4))
+        print("Predicted Total:", round(predicted_total, 2))
+        print("Closing Line:", live_total)
+        print("=========================")
+
+        logger.info("Game Pace: %.2f  Home PPP: %.4f  Away PPP: %.4f", game_pace, home_ppp, away_ppp)
+        logger.info("Predicted Total: %.2f  Closing Line: %.1f", predicted_total, live_total)
+
+        # --- Module 6: Monte Carlo Simulation ---
+        sim = run_total_simulation(
+            game_id=game_id,
+            predicted_total=predicted_total,
+            closing_total=live_total,
+            pace_diff=pace_diff,
+            ppp_home=home_ppp,
+            ppp_away=away_ppp,
+            n_sim=MIN_SIMULATION_COUNT,
+        )
+
+        # --- Module 7: Probability Calculation ---
+        over_probability = sim["over_probability"]
+        under_probability = sim["under_probability"]
+
+        print("Over Probability:", round(over_probability, 4))
+        print("Under Probability:", round(under_probability, 4))
         print("=========================")
 
         progress.set_game_progress(
             f"⚙️ Game {idx + 1}/{len(games)}: {zh_name(vis['full_name'])} vs {zh_name(home['full_name'])} ✅"
         )
 
-        # --- Step 5: Verify simulation count ---
+        # --- Verify simulation count ---
         sim_count = sim.get("simulation_count", 0)
         if sim_count < MIN_SIMULATION_COUNT:
             logger.error("Simulation count %d < %d for game %s — aborting", sim_count, MIN_SIMULATION_COUNT, game_id)
             sys.exit(1)
         logger.info("Simulation runs: %d (game_id=%s)", sim_count, game_id)
 
-        # --- Hybrid spread decision: combine Monte Carlo + classifier ---
-        mc_spread_prob = sim["spread_cover_probability"]
-        if spread_cover_prob_model is not None:
-            combined_spread_prob = MC_WEIGHT * mc_spread_prob + CLASSIFIER_WEIGHT * spread_cover_prob_model
+        # --- Module 8: Model Judgment ---
+        if over_probability > 0.5:
+            total_pick = "大分"
         else:
-            combined_spread_prob = mc_spread_prob
+            total_pick = "小分"
 
-        if predicted_margin > -live_spread:
-            spread_pick = f"主队 {zh_name(home['full_name'])} {live_spread:+.1f}"
-            spread_pick_label = "home_cover"
-        else:
-            spread_pick = f"客队 {zh_name(vis['full_name'])} {-live_spread:+.1f}（受让）"
-            spread_pick_label = "away_cover"
-
-        # --- Hybrid total decision: combine Monte Carlo + classifier ---
-        mc_total_prob = sim["over_probability"]
-        if prob_over is not None:
-            combined_total_prob = MC_WEIGHT * mc_total_prob + CLASSIFIER_WEIGHT * prob_over
-        else:
-            combined_total_prob = mc_total_prob
-
-        # --- Probability calibration: shrink toward neutral ---
-        calibrated_total_prob = PROB_RAW_WEIGHT * combined_total_prob + PROB_NEUTRAL_WEIGHT * NEUTRAL_PROBABILITY
-        combined_total_prob = calibrated_total_prob
-
-        # Total pick: use classifier prediction rule when available, else use model total
-        if total_prediction is None:
-            if predicted_total > live_total:
-                total_pick = "大分"
-            else:
-                total_pick = "小分"
-
-        # --- Rating from simulation edge ---
-        spread_rating = compute_spread_rating(combined_spread_prob, live_spread)
-        total_rating = compute_total_rating(combined_total_prob, live_total)
-
-        spread_edge = combined_spread_prob - 0.5
-        total_edge = combined_total_prob - 0.5
-        market = analyze_line_behavior(opening_spread, live_spread, spread_edge, opening_total, live_total, total_edge)
-
-        spread_confidence = spread_rating["spread_confidence"]
-        total_confidence = total_rating["total_confidence"]
-        spread_stars = spread_rating["spread_stars"]
-        total_stars = total_rating["total_stars"]
-
-        # --- Edge scoring ---
-        overall_edge_raw = max(abs(spread_edge), abs(total_edge)) * 100.0
-        edge_score = compute_edge_score(
-            max(combined_spread_prob, combined_total_prob)
-        )
-        clv_projection = round((live_spread - opening_spread) if opening_spread and live_spread else 0.0, 2)
-
-        # --- Total edge & signal score ---
-        total_edge_pts = predicted_total - live_total
-        abs_edge = abs(total_edge_pts)
-        total_std = sim["total_std"]
-        over_probability = combined_total_prob
-
-        signal_score = (
-            abs_edge * 0.6
-            + over_probability * 40
-            - total_std * 0.2
-        )
-
-        # --- Recommendation reason (based on abs_edge) ---
-        if abs_edge >= 7:
-            reason = "模型预测与盘口差距较大"
-        elif abs_edge >= 4:
-            reason = "模型预测存在明显价值"
-        else:
-            reason = "信号较弱，不推荐"
-
-        # --- Step 6: Save prediction to database ---
-        spread_prob = combined_spread_prob
-        total_prob = combined_total_prob
-        overall_confidence = max(abs(spread_edge), abs(total_edge))
-        overall_stars = max(spread_stars, total_stars)
-        recommendation_idx = max(spread_rating["spread_recommendation_index"],
-                                 total_rating["total_recommendation_index"])
-
+        # --- Save prediction to database ---
         prediction_row = {
             "game_id": game_id,
             "home_team": home.get("full_name", ""),
             "away_team": vis.get("full_name", ""),
             "prediction_time": datetime.utcnow().isoformat(),
-            "spread_pick": spread_pick,
-            "spread_prob": spread_prob,
             "total_pick": total_pick,
-            "total_prob": total_prob,
-            "confidence_score": round(overall_confidence, 4),
-            "star_rating": overall_stars,
-            "recommendation_index": recommendation_idx,
-            "expected_home_score": sim["expected_home_score"],
-            "expected_visitor_score": sim["expected_visitor_score"],
-            "simulation_variance": sim["score_distribution_variance"],
-            "opening_spread": opening_spread,
-            "live_spread": live_spread,
+            "total_prob": over_probability,
             "opening_total": opening_total,
             "live_total": live_total,
             "simulation_runs": sim_count,
             "odds_source": odds_source,
             "model_version": model_bundle.version,
             "feature_count": feature_count,
-            "spread_edge": round(spread_edge, 4),
-            "total_edge": round(total_edge, 4),
-            "edge_score": edge_score,
-            "clv_projection": clv_projection,
-            "home_win_probability": sim.get("home_win_probability", 0.0),
-            "details": {"simulation": sim, "market": market,
-                        "spread_rating": spread_rating, "total_rating": total_rating},
         }
 
         insert_prediction(snapshot_date=target_date, row=prediction_row)
@@ -645,10 +418,7 @@ def run_prediction(target_date: str | None = None) -> None:
         save_prediction({
             **prediction_row,
             "game_date": target_date,
-            "spread_line": live_spread,
             "total_line": live_total,
-            "spread_confidence": spread_confidence,
-            "total_confidence": total_confidence,
         })
         save_simulation_log({
             "game_id": game_id,
@@ -658,24 +428,14 @@ def run_prediction(target_date: str | None = None) -> None:
         })
 
         # --- Collect game result for core pick selection ---
-        total_range = f"{int(sim['total_5pct'])} – {int(sim['total_95pct'])}"
-        under_probability = 1.0 - over_probability
-
         game_results.append({
             "idx": len(game_results),
             "game_id": game_id,
             "home": home,
             "vis": vis,
             "live_total": live_total,
-            "predicted_total": predicted_total,
-            "total_edge_pts": total_edge_pts,
             "over_probability": over_probability,
             "under_probability": under_probability,
-            "total_range": total_range,
-            "low": sim['total_5pct'],
-            "high": sim['total_95pct'],
-            "reason": reason,
-            "signal_score": signal_score,
             "odds_source": odds_source,
         })
 

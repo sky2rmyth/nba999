@@ -80,7 +80,7 @@ def test_insert_prediction_marks_previous_as_non_final(_fresh_db):
     # First prediction
     insert_prediction("2025-01-15", base)
     # Second prediction (same game_id)
-    insert_prediction("2025-01-15", {**base, "game_id": 100})
+    insert_prediction("2025-01-15", base)
 
     with get_conn() as conn:
         rows = conn.execute(

@@ -196,7 +196,7 @@ class TestPaceModel:
     def test_home_back_to_back(self):
         from app.pace_model import calculate_game_pace
         # B2B reduces pace_raw by 0.8 before league regression
-        # pace_raw = 99 - 0.8 = 98.2; game_pace = 98.2 * 0.6 + 40 = 98.92
+        # pace_raw = 99 - 0.8 = 98.2; game_pace = 98.2 * 0.6 + 100 * 0.4 = 98.92
         with_b2b = calculate_game_pace(100.0, 98.0, home_back_to_back=True)
         assert abs(with_b2b - 98.92) < 0.001
 
@@ -207,19 +207,19 @@ class TestPaceModel:
 
     def test_both_back_to_back(self):
         from app.pace_model import calculate_game_pace
-        # pace_raw = 99 - 1.6 = 97.4; game_pace = 97.4 * 0.6 + 40 = 98.44
+        # pace_raw = 99 - 1.6 = 97.4; game_pace = 97.4 * 0.6 + 100 * 0.4 = 98.44
         with_b2b = calculate_game_pace(100.0, 98.0, home_back_to_back=True, away_back_to_back=True)
         assert abs(with_b2b - 98.44) < 0.001
 
     def test_high_pace(self):
         from app.pace_model import calculate_game_pace
-        # pace_raw = (110 + 108) / 2 = 109; game_pace = 109 * 0.6 + 40 = 105.4
+        # pace_raw = (110 + 108) / 2 = 109; game_pace = 109 * 0.6 + 100 * 0.4 = 105.4
         result = calculate_game_pace(110.0, 108.0)
         assert abs(result - 105.4) < 0.001
 
     def test_negative_pace_diff(self):
         from app.pace_model import calculate_game_pace
-        # pace_raw = (95 + 100) / 2 = 97.5; game_pace = 97.5 * 0.6 + 40 = 98.5
+        # pace_raw = (95 + 100) / 2 = 97.5; game_pace = 97.5 * 0.6 + 100 * 0.4 = 98.5
         result = calculate_game_pace(95.0, 100.0)
         assert abs(result - 98.5) < 0.001
 
@@ -465,13 +465,13 @@ class TestGamePaceCalculation:
 
     def test_high_pace(self):
         from app.pace_model import calculate_game_pace
-        # pace_raw = (110 + 108) / 2 = 109; game_pace = 109 * 0.6 + 40 = 105.4
+        # pace_raw = (110 + 108) / 2 = 109; game_pace = 109 * 0.6 + 100 * 0.4 = 105.4
         result = calculate_game_pace(110.0, 108.0)
         assert abs(result - 105.4) < 0.001
 
     def test_low_pace(self):
         from app.pace_model import calculate_game_pace
-        # pace_raw = (88 + 90) / 2 = 89; game_pace = 89 * 0.6 + 40 = 93.4 → clamped to 96
+        # pace_raw = (88 + 90) / 2 = 89; game_pace = 89 * 0.6 + 100 * 0.4 = 93.4 → clamped to 96
         result = calculate_game_pace(88.0, 90.0)
         assert abs(result - 96.0) < 0.001
 
@@ -481,8 +481,8 @@ class TestGamePaceCalculation:
 
     def test_b2b_reduces_pace(self):
         from app.pace_model import calculate_game_pace
-        # no b2b: pace_raw=100, game_pace = 100*0.6+40 = 100.0
-        # home b2b: pace_raw=100-0.8=99.2, game_pace = 99.2*0.6+40 = 99.52
+        # no b2b: pace_raw=100, game_pace = 100 * 0.6 + 100 * 0.4 = 100.0
+        # home b2b: pace_raw=100-0.8=99.2, game_pace = 99.2 * 0.6 + 100 * 0.4 = 99.52
         result_no_b2b = calculate_game_pace(105.0, 95.0)
         result_home_b2b = calculate_game_pace(105.0, 95.0, home_back_to_back=True)
         assert result_home_b2b < result_no_b2b

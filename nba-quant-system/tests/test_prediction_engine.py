@@ -241,7 +241,7 @@ class TestPPPModel:
     def test_ppp_ratio_formula(self):
         """PPP uses ratio: (off_rating / opp_def_rating) * league_ppp, then shooting corrections."""
         from app.ppp_model import calculate_ppp
-        # home: (112 / 110) * 1.12 ≈ 1.1403 clamped to 1.1403
+        # home: (112 / 110) * 1.12 ≈ 1.1403 (within [1.02, 1.18], no clamping)
         # 3P correction: * (1 + (0.37 - 0.37) * 0.20) = * 1.0
         # FT correction: * (1 + 0.27 * 0.05) = * 1.0135
         h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
@@ -508,7 +508,7 @@ class TestPPPCalculation:
         """PPP_home = (home_off / away_def) * 1.12, then shooting corrections."""
         from app.ppp_model import calculate_ppp
         h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-        # After shooting corrections, PPP can slightly exceed 1.18
+        # After shooting corrections (FT rate * 0.05), PPP can exceed base clamp of 1.18
         assert h > 1.02
         assert a > 1.02
 
@@ -517,7 +517,8 @@ class TestPPPCalculation:
         from app.ppp_model import calculate_ppp
         for off in [105.0, 110.0, 114.0, 118.0]:
             h, a = calculate_ppp(off, off, 110.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-            # Base PPP clamped to [1.02, 1.18], then * FT factor ≈ 1.0135
+            # Base PPP clamped to [1.02, 1.18], then * (1 + ft_rate * 0.05) ≈ 1.0135
+            # Max possible ≈ 1.18 * 1.0135 ≈ 1.196
             assert 1.02 <= h <= 1.25
 
     def test_predicted_total_in_range(self):

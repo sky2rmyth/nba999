@@ -5,7 +5,7 @@ ratings with shooting structure corrections.
 """
 from __future__ import annotations
 
-LEAGUE_3P_RATE = 0.37
+LEAGUE_3P_RATE = 0.37  # League-average 3-point attempt rate (3PA / FGA)
 
 
 def calculate_ppp(

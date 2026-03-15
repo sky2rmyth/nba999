@@ -72,21 +72,15 @@ def test_insert_prediction_marks_previous_as_non_final(_fresh_db):
     """Re-predicting the same game marks the old prediction as non-final."""
     base = {
         "game_id": 100,
-        "prediction_time": "2025-01-15T12:00:00",
         "total_pick": "over",
-        "total_prob": 0.55,
-        "confidence_score": 0.1,
-        "star_rating": 3,
-        "recommendation_index": 0.5,
-        "expected_home_score": 110.0,
-        "expected_visitor_score": 105.0,
-        "simulation_variance": 64.0,
+        "over_prob": 0.55,
+        "under_prob": 0.45,
     }
 
     # First prediction
     insert_prediction("2025-01-15", base)
     # Second prediction (same game_id)
-    insert_prediction("2025-01-15", {**base, "prediction_time": "2025-01-15T13:00:00"})
+    insert_prediction("2025-01-15", {**base, "game_id": 100})
 
     with get_conn() as conn:
         rows = conn.execute(
@@ -102,15 +96,9 @@ def test_insert_prediction_new_game_is_final(_fresh_db):
     """A prediction for a brand-new game_id is final by default."""
     base = {
         "game_id": 200,
-        "prediction_time": "2025-01-15T12:00:00",
         "total_pick": "over",
-        "total_prob": 0.55,
-        "confidence_score": 0.1,
-        "star_rating": 3,
-        "recommendation_index": 0.5,
-        "expected_home_score": 110.0,
-        "expected_visitor_score": 105.0,
-        "simulation_variance": 64.0,
+        "over_prob": 0.55,
+        "under_prob": 0.45,
     }
     insert_prediction("2025-01-15", base)
 

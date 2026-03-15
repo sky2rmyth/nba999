@@ -399,15 +399,9 @@ def run_prediction(target_date: str | None = None) -> None:
             "game_id": game_id,
             "home_team": home.get("full_name", ""),
             "away_team": vis.get("full_name", ""),
-            "prediction_time": datetime.utcnow().isoformat(),
             "total_pick": total_pick,
-            "total_prob": over_probability,
-            "opening_total": opening_total,
-            "live_total": live_total,
-            "simulation_runs": sim_count,
-            "odds_source": odds_source,
-            "model_version": model_bundle.version,
-            "feature_count": feature_count,
+            "over_prob": over_probability,
+            "under_prob": under_probability,
         }
 
         insert_prediction(snapshot_date=target_date, row=prediction_row)

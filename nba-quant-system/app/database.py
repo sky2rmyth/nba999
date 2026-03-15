@@ -47,15 +47,9 @@ def init_db() -> None:
                 game_id INTEGER NOT NULL,
                 home_team TEXT,
                 away_team TEXT,
-                prediction_time TEXT NOT NULL,
                 total_pick TEXT NOT NULL,
-                total_prob REAL NOT NULL,
-                confidence_score REAL NOT NULL,
-                star_rating INTEGER NOT NULL,
-                recommendation_index REAL NOT NULL,
-                expected_home_score REAL NOT NULL,
-                expected_visitor_score REAL NOT NULL,
-                simulation_variance REAL NOT NULL,
+                over_prob REAL,
+                under_prob REAL,
                 opening_spread REAL,
                 live_spread REAL,
                 opening_total REAL,
@@ -63,7 +57,6 @@ def init_db() -> None:
                 simulation_runs INTEGER NOT NULL DEFAULT 10000,
                 odds_source TEXT NOT NULL DEFAULT 'NONE',
                 is_final_prediction BOOLEAN NOT NULL DEFAULT 1,
-                details_json TEXT NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS results (
@@ -132,33 +125,18 @@ def insert_prediction(snapshot_date: str, row: dict[str, Any]) -> None:
         conn.execute(
             """
             INSERT INTO predictions_snapshot(
-                snapshot_date,game_id,home_team,away_team,prediction_time,total_pick,total_prob,
-                confidence_score,star_rating,recommendation_index,expected_home_score,expected_visitor_score,
-                simulation_variance,opening_spread,live_spread,opening_total,live_total,
-                simulation_runs,odds_source,is_final_prediction,details_json
-            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
+                snapshot_date,game_id,home_team,away_team,total_pick,
+                over_prob,under_prob,is_final_prediction
+            ) VALUES(?,?,?,?,?,?,?,1)
             """,
             (
                 snapshot_date,
                 row["game_id"],
                 row.get("home_team"),
                 row.get("away_team"),
-                row["prediction_time"],
                 row["total_pick"],
-                row["total_prob"],
-                row["confidence_score"],
-                row["star_rating"],
-                row["recommendation_index"],
-                row["expected_home_score"],
-                row["expected_visitor_score"],
-                row["simulation_variance"],
-                row.get("opening_spread"),
-                row.get("live_spread"),
-                row.get("opening_total"),
-                row.get("live_total"),
-                row.get("simulation_runs", 10000),
-                row.get("odds_source", "NONE"),
-                json.dumps(row.get("details", {}), ensure_ascii=False),
+                row["over_prob"],
+                row["under_prob"],
             ),
         )
 

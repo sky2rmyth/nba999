@@ -79,6 +79,7 @@ def build_prediction_table(games):
     headers = [
         ("比赛", 22),
         ("盘口", 6),
+        ("模型总分", 8),
         ("大分概率", 10),
         ("小分概率", 10),
         ("模型判断", 8),
@@ -96,6 +97,7 @@ def build_prediction_table(games):
     for g in games:
         match = f"{g['away']} vs {g['home']}"
         line = str(g["line"])
+        model_total = str(g.get("model_total", ""))
         over_prob = f"{g['over_prob']:.1%}" if isinstance(g['over_prob'], float) else str(g['over_prob'])
         under_prob = f"{g['under_prob']:.1%}" if isinstance(g['under_prob'], float) else str(g['under_prob'])
         prediction = g["prediction"]
@@ -104,6 +106,7 @@ def build_prediction_table(games):
         row_data = [
             (match, 22),
             (line, 6),
+            (model_total, 8),
             (over_prob, 10),
             (under_prob, 10),
             (prediction, 8),
@@ -342,6 +345,9 @@ def run_prediction(target_date: str | None = None) -> None:
         # --- Module 4: Total Calculation ---
         predicted_total = calculate_predicted_total(game_pace, home_ppp, away_ppp, live_total)
 
+        # --- Module 5: Market Deviation Correction ---
+        predicted_total = apply_market_calibration(predicted_total, live_total)
+
         # --- Debug output ---
         print("====== MODEL DEBUG ======")
         print("Game Pace:", round(game_pace, 2))
@@ -385,10 +391,12 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("Simulation runs: %d (game_id=%s)", sim_count, game_id)
 
         # --- Module 8: Model Judgment ---
-        if over_probability > 0.5:
+        if over_probability >= 0.60:
             total_pick = "大分"
-        else:
+        elif under_probability >= 0.60:
             total_pick = "小分"
+        else:
+            total_pick = "PASS"
 
         # --- Save prediction to database ---
         prediction_row = {
@@ -424,6 +432,7 @@ def run_prediction(target_date: str | None = None) -> None:
             "home": home,
             "vis": vis,
             "live_total": live_total,
+            "predicted_total": predicted_total,
             "over_probability": over_probability,
             "under_probability": under_probability,
             "odds_source": odds_source,
@@ -431,7 +440,7 @@ def run_prediction(target_date: str | None = None) -> None:
 
     # --- Daily recommendation ---
     # Sort all games by confidence = abs(prob_over - 0.5) descending.
-    # Core pick: the game with max confidence where probability >= 0.60.
+    # Core pick: the game with max confidence where probability >= 0.70.
     # Only 1 core pick allowed per day.
     if game_results:
         # Compute confidence for each game
@@ -441,10 +450,10 @@ def run_prediction(target_date: str | None = None) -> None:
 
         sorted_results = sorted(game_results, key=lambda x: x["confidence"], reverse=True)
 
-        # Core pick: max confidence game with max(over_prob, under_prob) >= 0.60
+        # Core pick: max confidence game with max(over_prob, under_prob) >= 0.70
         for gr in sorted_results:
             max_prob = max(gr["over_probability"], gr["under_probability"])
-            if max_prob >= 0.60:
+            if max_prob >= 0.70:
                 gr["is_core"] = True
                 break  # Only 1 core pick
     else:
@@ -455,15 +464,18 @@ def run_prediction(target_date: str | None = None) -> None:
     for gr in sorted_results:
         prob_over = gr["over_probability"]
         prob_under = gr["under_probability"]
-        if prob_over > 0.5:
+        if prob_over >= 0.60:
             prediction = "大分"
-        else:
+        elif prob_under >= 0.60:
             prediction = "小分"
+        else:
+            prediction = "PASS"
 
         predictions.append({
             "away": zh_name(gr["vis"]["full_name"]),
             "home": zh_name(gr["home"]["full_name"]),
             "line": gr["live_total"],
+            "model_total": round(gr["predicted_total"], 1),
             "over_prob": prob_over,
             "under_prob": prob_under,
             "prediction": prediction,

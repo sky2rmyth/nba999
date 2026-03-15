@@ -48,4 +48,7 @@ def calculate_ppp(
     ppp_away *= 1 + away_3p_rate * 0.12
     ppp_away *= 1 + away_ft_rate * 0.06
 
+    ppp_home = max(1.02, min(ppp_home, 1.18))
+    ppp_away = max(1.02, min(ppp_away, 1.18))
+
     return ppp_home, ppp_away

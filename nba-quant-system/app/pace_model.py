@@ -39,4 +39,5 @@ def calculate_game_pace(
     if away_back_to_back:
         pace -= 0.8
 
-    return pace
+    game_pace = max(96, min(pace, 108))
+    return game_pace

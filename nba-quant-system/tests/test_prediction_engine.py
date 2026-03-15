@@ -213,9 +213,9 @@ class TestPaceModel:
 
     def test_high_pace(self):
         from app.pace_model import calculate_game_pace
-        # (110 + 108) / 2 + (110 - 108) * 0.15 = 109 + 0.3 = 109.3
+        # (110 + 108) / 2 + (110 - 108) * 0.15 = 109.3 → clamped to 108
         result = calculate_game_pace(110.0, 108.0)
-        assert abs(result - 109.3) < 0.001
+        assert abs(result - 108.0) < 0.001
 
     def test_negative_pace_diff(self):
         from app.pace_model import calculate_game_pace
@@ -462,15 +462,15 @@ class TestGamePaceCalculation:
 
     def test_high_pace(self):
         from app.pace_model import calculate_game_pace
-        # (110 + 108) / 2 + (110 - 108) * 0.15 = 109 + 0.3 = 109.3
+        # (110 + 108) / 2 + (110 - 108) * 0.15 = 109.3 → clamped to 108
         result = calculate_game_pace(110.0, 108.0)
-        assert abs(result - 109.3) < 0.001
+        assert abs(result - 108.0) < 0.001
 
     def test_low_pace(self):
         from app.pace_model import calculate_game_pace
-        # (88 + 90) / 2 + (88 - 90) * 0.15 = 89 - 0.3 = 88.7
+        # (88 + 90) / 2 + (88 - 90) * 0.15 = 88.7 → clamped to 96
         result = calculate_game_pace(88.0, 90.0)
-        assert abs(result - 88.7) < 0.001
+        assert abs(result - 96.0) < 0.001
 
     def test_equal_pace(self):
         from app.pace_model import calculate_game_pace

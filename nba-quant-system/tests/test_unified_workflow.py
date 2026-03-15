@@ -73,8 +73,6 @@ def test_insert_prediction_marks_previous_as_non_final(_fresh_db):
     base = {
         "game_id": 100,
         "prediction_time": "2025-01-15T12:00:00",
-        "spread_pick": "home_cover",
-        "spread_prob": 0.6,
         "total_pick": "over",
         "total_prob": 0.55,
         "confidence_score": 0.1,
@@ -105,8 +103,6 @@ def test_insert_prediction_new_game_is_final(_fresh_db):
     base = {
         "game_id": 200,
         "prediction_time": "2025-01-15T12:00:00",
-        "spread_pick": "home_cover",
-        "spread_prob": 0.6,
         "total_pick": "over",
         "total_prob": 0.55,
         "confidence_score": 0.1,

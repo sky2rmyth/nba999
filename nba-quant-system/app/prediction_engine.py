@@ -340,11 +340,7 @@ def run_prediction(target_date: str | None = None) -> None:
             logger.info("Injury adjustment applied: %s PPP -= 0.04", vis["full_name"])
 
         # --- Module 4: Total Calculation ---
-        predicted_total = calculate_predicted_total(game_pace, home_ppp, away_ppp)
-
-        # --- Module 5: Market Calibration ---
-        ot = opening_total if opening_total is not None else live_total
-        predicted_total = apply_market_calibration(predicted_total, ot, live_total)
+        predicted_total = calculate_predicted_total(game_pace, home_ppp, away_ppp, live_total)
 
         # --- Debug output ---
         print("====== MODEL DEBUG ======")

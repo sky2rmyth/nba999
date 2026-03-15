@@ -30,14 +30,16 @@ def calculate_game_pace(
     float
         Expected game pace.
     """
-    pace_diff = home_pace - away_pace
-    pace_base = (home_pace + away_pace) / 2
-    pace = pace_base + pace_diff * 0.15
+    league_pace = 100
+
+    pace_raw = (home_pace + away_pace) / 2
 
     if home_back_to_back:
-        pace -= 0.8
+        pace_raw -= 0.8
     if away_back_to_back:
-        pace -= 0.8
+        pace_raw -= 0.8
 
-    game_pace = max(96, min(pace, 108))
+    game_pace = pace_raw * 0.6 + league_pace * 0.4
+
+    game_pace = max(96, min(game_pace, 106))
     return game_pace

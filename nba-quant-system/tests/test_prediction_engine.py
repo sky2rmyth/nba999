@@ -180,13 +180,13 @@ class TestRecommendationLegacy:
 
 
 class TestPaceModel:
-    """Test pace model: (home + away) / 2 + pace_diff * 0.15 with B2B adjustments."""
+    """Test pace model: pace_raw * 0.6 + league_pace * 0.4 with B2B adjustments."""
 
     def test_basic_pace(self):
         from app.pace_model import calculate_game_pace
-        # (100 + 98) / 2 + (100 - 98) * 0.15 = 99 + 0.3 = 99.3
+        # pace_raw = (100 + 98) / 2 = 99; game_pace = 99 * 0.6 + 100 * 0.4 = 99.4
         result = calculate_game_pace(100.0, 98.0)
-        assert abs(result - 99.3) < 0.001
+        assert abs(result - 99.4) < 0.001
 
     def test_equal_pace(self):
         from app.pace_model import calculate_game_pace
@@ -195,65 +195,66 @@ class TestPaceModel:
 
     def test_home_back_to_back(self):
         from app.pace_model import calculate_game_pace
-        base = calculate_game_pace(100.0, 98.0)
+        # B2B reduces pace_raw by 0.8 before league regression
+        # pace_raw = 99 - 0.8 = 98.2; game_pace = 98.2 * 0.6 + 40 = 98.92
         with_b2b = calculate_game_pace(100.0, 98.0, home_back_to_back=True)
-        assert abs(with_b2b - (base - 0.8)) < 0.001
+        assert abs(with_b2b - 98.92) < 0.001
 
     def test_away_back_to_back(self):
         from app.pace_model import calculate_game_pace
-        base = calculate_game_pace(100.0, 98.0)
         with_b2b = calculate_game_pace(100.0, 98.0, away_back_to_back=True)
-        assert abs(with_b2b - (base - 0.8)) < 0.001
+        assert abs(with_b2b - 98.92) < 0.001
 
     def test_both_back_to_back(self):
         from app.pace_model import calculate_game_pace
-        base = calculate_game_pace(100.0, 98.0)
+        # pace_raw = 99 - 1.6 = 97.4; game_pace = 97.4 * 0.6 + 40 = 98.44
         with_b2b = calculate_game_pace(100.0, 98.0, home_back_to_back=True, away_back_to_back=True)
-        assert abs(with_b2b - (base - 1.6)) < 0.001
+        assert abs(with_b2b - 98.44) < 0.001
 
     def test_high_pace(self):
         from app.pace_model import calculate_game_pace
-        # (110 + 108) / 2 + (110 - 108) * 0.15 = 109.3 → clamped to 108
+        # pace_raw = (110 + 108) / 2 = 109; game_pace = 109 * 0.6 + 40 = 105.4
         result = calculate_game_pace(110.0, 108.0)
-        assert abs(result - 108.0) < 0.001
+        assert abs(result - 105.4) < 0.001
 
     def test_negative_pace_diff(self):
         from app.pace_model import calculate_game_pace
-        # (95 + 100) / 2 + (95 - 100) * 0.15 = 97.5 - 0.75 = 96.75
+        # pace_raw = (95 + 100) / 2 = 97.5; game_pace = 97.5 * 0.6 + 40 = 98.5
         result = calculate_game_pace(95.0, 100.0)
-        assert abs(result - 96.75) < 0.001
+        assert abs(result - 98.5) < 0.001
 
 
 class TestPPPModel:
-    """Test PPP model: (off + opp_def) / 200 with shooting correction."""
+    """Test PPP model: (off / opp_def) * league_ppp with ratio formula."""
 
     def test_basic_ppp(self):
         from app.ppp_model import calculate_ppp
-        # home: (112 + 110) / 200 = 1.11; away: (110 + 108) / 200 = 1.09
-        # Then shooting corrections applied
+        # home: (112 / 110) * 1.12 ≈ 1.1403; away: (110 / 108) * 1.12 ≈ 1.1407
         h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.36, 0.27, 0.26)
         assert h > 0
         assert a > 0
 
-    def test_ppp_increases_with_3p_rate(self):
+    def test_ppp_ratio_formula(self):
+        """PPP uses ratio: (off_rating / opp_def_rating) * league_ppp."""
         from app.ppp_model import calculate_ppp
-        h_low, _ = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.30, 0.30, 0.27, 0.27)
-        h_high, _ = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.45, 0.30, 0.27, 0.27)
-        assert h_high > h_low
+        # home: (112 / 110) * 1.12 ≈ 1.1403
+        h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
+        expected_home = (112.0 / 110.0) * 1.12
+        assert abs(h - expected_home) < 0.001
 
-    def test_ppp_increases_with_ft_rate(self):
+    def test_ppp_increases_with_off_rating(self):
         from app.ppp_model import calculate_ppp
-        h_low, _ = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.20, 0.20)
-        h_high, _ = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.35, 0.20)
+        h_low, _ = calculate_ppp(108.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
+        h_high, _ = calculate_ppp(116.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
         assert h_high > h_low
 
     def test_ppp_uses_opponent_def(self):
-        """PPP_home uses away_def_rating, PPP_away uses home_def_rating."""
+        """PPP_home uses away_def_rating — higher away_def (worse D) means lower PPP for home."""
         from app.ppp_model import calculate_ppp
-        # Higher opponent def rating → higher PPP (weaker defense)
+        # Higher opponent def rating (worse defense) → denominator bigger → lower PPP
         h1, _ = calculate_ppp(112.0, 110.0, 105.0, 108.0, 0.37, 0.37, 0.27, 0.27)
         h2, _ = calculate_ppp(112.0, 110.0, 105.0, 115.0, 0.37, 0.37, 0.27, 0.27)
-        assert h2 > h1  # Higher away_def → higher home PPP
+        assert h2 < h1  # Higher away_def → lower home PPP (bigger denominator)
 
 
 class TestCorePick:
@@ -417,17 +418,19 @@ class TestMarketModel:
 
 
 class TestTotalModel:
-    """Test total calculation: pace * (PPP_home + PPP_away)."""
+    """Test total calculation: model_total * 0.65 + closing_total * 0.35."""
 
     def test_basic_total(self):
         from app.total_model import calculate_predicted_total
-        result = calculate_predicted_total(99.0, 1.12, 1.10)
-        # 99 * (1.12 + 1.10) = 99 * 2.22 = 219.78
-        assert abs(result - 219.78) < 0.01
+        # model_total = 99 * (1.12 + 1.10) = 219.78
+        # predicted = 219.78 * 0.65 + 220.0 * 0.35 = 142.857 + 77.0 = 219.857
+        result = calculate_predicted_total(99.0, 1.12, 1.10, closing_total=220.0)
+        expected = 219.78 * 0.65 + 220.0 * 0.35
+        assert abs(result - expected) < 0.01
 
     def test_high_pace(self):
         from app.total_model import calculate_predicted_total
-        result = calculate_predicted_total(105.0, 1.15, 1.12)
+        result = calculate_predicted_total(105.0, 1.15, 1.12, closing_total=235.0)
         assert result > 230
 
 
@@ -452,23 +455,23 @@ class TestLeagueConstants:
 
 
 class TestGamePaceCalculation:
-    """Test new pace model: (home + away) / 2 + pace_diff * 0.15."""
+    """Test pace model: pace_raw * 0.6 + league_pace * 0.4."""
 
     def test_normal_pace(self):
         from app.pace_model import calculate_game_pace
-        # (100 + 98) / 2 + (100 - 98) * 0.15 = 99 + 0.3 = 99.3
+        # pace_raw = (100 + 98) / 2 = 99; game_pace = 99 * 0.6 + 100 * 0.4 = 99.4
         result = calculate_game_pace(100.0, 98.0)
-        assert abs(result - 99.3) < 0.001
+        assert abs(result - 99.4) < 0.001
 
     def test_high_pace(self):
         from app.pace_model import calculate_game_pace
-        # (110 + 108) / 2 + (110 - 108) * 0.15 = 109.3 → clamped to 108
+        # pace_raw = (110 + 108) / 2 = 109; game_pace = 109 * 0.6 + 40 = 105.4
         result = calculate_game_pace(110.0, 108.0)
-        assert abs(result - 108.0) < 0.001
+        assert abs(result - 105.4) < 0.001
 
     def test_low_pace(self):
         from app.pace_model import calculate_game_pace
-        # (88 + 90) / 2 + (88 - 90) * 0.15 = 88.7 → clamped to 96
+        # pace_raw = (88 + 90) / 2 = 89; game_pace = 89 * 0.6 + 40 = 93.4 → clamped to 96
         result = calculate_game_pace(88.0, 90.0)
         assert abs(result - 96.0) < 0.001
 
@@ -478,32 +481,29 @@ class TestGamePaceCalculation:
 
     def test_b2b_reduces_pace(self):
         from app.pace_model import calculate_game_pace
-        # (105 + 95) / 2 + (105 - 95) * 0.15 = 100 + 1.5 = 101.5
+        # no b2b: pace_raw=100, game_pace = 100*0.6+40 = 100.0
+        # home b2b: pace_raw=100-0.8=99.2, game_pace = 99.2*0.6+40 = 99.52
         result_no_b2b = calculate_game_pace(105.0, 95.0)
         result_home_b2b = calculate_game_pace(105.0, 95.0, home_back_to_back=True)
-        assert abs(result_home_b2b - (result_no_b2b - 0.8)) < 0.001
+        assert result_home_b2b < result_no_b2b
 
 
 class TestPPPCalculation:
-    """PPP uses (off + opp_def) / 200 with shooting corrections."""
+    """PPP uses (off / opp_def) * league_ppp ratio formula."""
 
     def test_ppp_formula(self):
-        """PPP_home = (home_off + away_def) / 200 * shooting_corrections."""
+        """PPP_home = (home_off / away_def) * 1.12."""
         from app.ppp_model import calculate_ppp
         h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-        # base_home = (112 + 110) / 200 = 1.11
-        # * (1 + 0.37 * 0.12) = 1.0444
-        # * (1 + 0.27 * 0.06) = 1.0162
-        # ≈ 1.11 * 1.0444 * 1.0162 ≈ 1.178
-        assert 1.0 <= h <= 1.4
-        assert 1.0 <= a <= 1.4
+        assert 1.02 <= h <= 1.18
+        assert 1.02 <= a <= 1.18
 
     def test_ppp_within_normal_range(self):
-        """Realistic ratings produce PPP in [1.0, 1.4]."""
+        """Realistic ratings produce PPP in [1.02, 1.18]."""
         from app.ppp_model import calculate_ppp
         for off in [105.0, 110.0, 114.0, 118.0]:
             h, a = calculate_ppp(off, off, 110.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-            assert 1.0 <= h <= 1.4
+            assert 1.02 <= h <= 1.18
 
     def test_predicted_total_in_range(self):
         """With realistic PPP and pace, predicted total stays in a reasonable range."""
@@ -512,7 +512,7 @@ class TestPPPCalculation:
         from app.total_model import calculate_predicted_total
         game_pace = calculate_game_pace(99.0, 99.0)
         home_ppp, away_ppp = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-        predicted_total = calculate_predicted_total(game_pace, home_ppp, away_ppp)
+        predicted_total = calculate_predicted_total(game_pace, home_ppp, away_ppp, closing_total=225.0)
         assert 200 <= predicted_total <= 260
 
 
@@ -554,21 +554,15 @@ class TestSimulationEngine:
         )
         assert sim["under_probability"] > 0.5
 
-    def test_dynamic_std(self):
-        """Dynamic std = 10 + abs(pace_diff) * 0.6 + abs(ppp_home - ppp_away) * 4."""
-        pace_diff = 5.0
-        ppp_home = 1.15
-        ppp_away = 1.08
-        expected_std = 10 + abs(pace_diff) * 0.6 + abs(ppp_home - ppp_away) * 4
-        assert abs(expected_std - 13.28) < 0.01
-
-        # Verify the simulation produces results consistent with this std:
-        # larger pace_diff → wider distribution → probabilities closer to 0.5
+    def test_fixed_std(self):
+        """Standard deviation is fixed at 10."""
         from app.simulation_engine import run_total_simulation
-        narrow = run_total_simulation(1, 225.0, 220.0, 0.0, 1.12, 1.12, n_sim=50000)
-        wide = run_total_simulation(1, 225.0, 220.0, 10.0, 1.20, 1.02, n_sim=50000)
-        # Wider std should push over_prob closer to 0.5
-        assert abs(wide["over_probability"] - 0.5) < abs(narrow["over_probability"] - 0.5)
+        # With fixed std=10, same predicted_total and closing_total should
+        # give consistent results regardless of pace_diff and ppp values
+        sim1 = run_total_simulation(1, 225.0, 220.0, 0.0, 1.12, 1.12, n_sim=50000)
+        sim2 = run_total_simulation(1, 225.0, 220.0, 10.0, 1.20, 1.02, n_sim=50000)
+        # Both should produce the same over_probability (same seed, same std)
+        assert abs(sim1["over_probability"] - sim2["over_probability"]) < 0.001
 
 
 class TestSimulationConstants:

@@ -1,32 +1,32 @@
 """Market calibration model for NBA totals prediction.
 
-Adjusts the predicted total based on line movement between
-opening and closing totals.
+Applies a deviation correction when the model total diverges too far
+from the closing line.
 """
 from __future__ import annotations
 
 
 def apply_market_calibration(
-    predicted_total: float,
-    opening_total: float,
+    model_total: float,
     closing_total: float,
 ) -> float:
-    """Apply market line-movement calibration.
+    """Apply market deviation correction.
+
+    When the model total deviates more than 12 points from the closing
+    line, compress the difference to prevent runaway predictions.
 
     Parameters
     ----------
-    predicted_total : float
-        Model-derived predicted total before market adjustment.
-    opening_total : float
-        Opening total line from oddsmakers.
+    model_total : float
+        Model-derived total after pace/PPP calculation and market anchor.
     closing_total : float
         Closing total line from oddsmakers.
 
     Returns
     -------
     float
-        Adjusted predicted total.
+        Adjusted model total.
     """
-    line_move = closing_total - opening_total
-    predicted_total += line_move * 0.35
-    return predicted_total
+    if abs(model_total - closing_total) > 12:
+        model_total = closing_total + (model_total - closing_total) * 0.6
+    return model_total

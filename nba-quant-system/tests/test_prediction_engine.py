@@ -94,6 +94,7 @@ class TestBuildPredictionTable:
                 "away": "猛龙",
                 "home": "森林狼",
                 "line": 227.5,
+                "model_total": 232.1,
                 "over_prob": 0.642,
                 "under_prob": 0.358,
                 "prediction": "大分",
@@ -103,9 +104,10 @@ class TestBuildPredictionTable:
                 "away": "独行侠",
                 "home": "魔术",
                 "line": 228.5,
+                "model_total": 227.3,
                 "over_prob": 0.482,
                 "under_prob": 0.518,
-                "prediction": "小分",
+                "prediction": "PASS",
                 "is_core": False,
             },
         ]
@@ -114,6 +116,7 @@ class TestBuildPredictionTable:
         table = build_prediction_table(self._sample_games())
         assert "比赛" in table
         assert "盘口" in table
+        assert "模型总分" in table
         assert "大分概率" in table
         assert "小分概率" in table
         assert "模型判断" in table
@@ -136,7 +139,7 @@ class TestBuildPredictionTable:
         table = build_prediction_table(self._sample_games())
         assert "独行侠 vs 魔术" in table
         assert "228.5" in table
-        assert "小分" in table
+        assert "PASS" in table
 
     def test_empty_games(self):
         table = build_prediction_table([])
@@ -158,13 +161,14 @@ class TestBuildPredictionTable:
             "away": "爵士",
             "home": "奇才",
             "line": 243.5,
+            "model_total": 240.2,
             "over_prob": 0.41,
             "under_prob": 0.59,
-            "prediction": "小分",
+            "prediction": "PASS",
             "is_core": False,
         }]
         table = build_prediction_table(games)
-        assert "小分" in table
+        assert "PASS" in table
         assert "爵士 vs 奇才" in table
 
 
@@ -235,11 +239,14 @@ class TestPPPModel:
         assert a > 0
 
     def test_ppp_ratio_formula(self):
-        """PPP uses ratio: (off_rating / opp_def_rating) * league_ppp."""
+        """PPP uses ratio: (off_rating / opp_def_rating) * league_ppp, then shooting corrections."""
         from app.ppp_model import calculate_ppp
-        # home: (112 / 110) * 1.12 ≈ 1.1403
+        # home: (112 / 110) * 1.12 ≈ 1.1403 clamped to 1.1403
+        # 3P correction: * (1 + (0.37 - 0.37) * 0.20) = * 1.0
+        # FT correction: * (1 + 0.27 * 0.05) = * 1.0135
         h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-        expected_home = (112.0 / 110.0) * 1.12
+        base_home = (112.0 / 110.0) * 1.12
+        expected_home = base_home * 1.0 * (1 + 0.27 * 0.05)
         assert abs(h - expected_home) < 0.001
 
     def test_ppp_increases_with_off_rating(self):
@@ -265,7 +272,7 @@ class TestCorePick:
         """Mirror the new recommendation logic from prediction_engine.
 
         Sort by confidence = abs(prob_over - 0.5) descending.
-        Core pick: max confidence game with max(over_prob, under_prob) >= 0.60.
+        Core pick: max confidence game with max(over_prob, under_prob) >= 0.70.
         """
         for gr in results:
             gr["confidence"] = abs(gr["over_probability"] - 0.5)
@@ -273,42 +280,42 @@ class TestCorePick:
 
         sorted_results = sorted(results, key=lambda x: x["confidence"], reverse=True)
 
-        # Core pick: max confidence where max(over_prob, under_prob) >= 0.60
+        # Core pick: max confidence where max(over_prob, under_prob) >= 0.70
         for gr in sorted_results:
             max_prob = max(gr["over_probability"], gr["under_probability"])
-            if max_prob >= 0.60:
+            if max_prob >= 0.70:
                 gr["is_core"] = True
                 break
         return sorted_results
 
     def test_single_core_pick(self):
         results = [
-            {"idx": 0, "over_probability": 0.65, "under_probability": 0.35},
-            {"idx": 1, "over_probability": 0.68, "under_probability": 0.32},
+            {"idx": 0, "over_probability": 0.72, "under_probability": 0.28},
+            {"idx": 1, "over_probability": 0.75, "under_probability": 0.25},
             {"idx": 2, "over_probability": 0.55, "under_probability": 0.45},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
         assert len(core) == 1
-        # idx=1 has highest confidence (|0.68-0.5|=0.18) and prob >= 0.60
+        # idx=1 has highest confidence (|0.75-0.5|=0.25) and prob >= 0.70
         assert core[0]["idx"] == 1
 
-    def test_core_requires_prob_060(self):
-        """Core pick requires probability >= 0.60."""
+    def test_core_requires_prob_070(self):
+        """Core pick requires probability >= 0.70."""
         results = [
-            {"idx": 0, "over_probability": 0.55, "under_probability": 0.45},
-            {"idx": 1, "over_probability": 0.52, "under_probability": 0.48},
+            {"idx": 0, "over_probability": 0.65, "under_probability": 0.35},
+            {"idx": 1, "over_probability": 0.62, "under_probability": 0.38},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
-        # No game has prob >= 0.60, so no core pick
+        # No game has prob >= 0.70, so no core pick
         assert len(core) == 0
 
-    def test_no_core_when_all_below_060(self):
-        """When no game has probability >= 0.60, there is no core pick."""
+    def test_no_core_when_all_below_070(self):
+        """When no game has probability >= 0.70, there is no core pick."""
         results = [
-            {"idx": 0, "over_probability": 0.58, "under_probability": 0.42},
-            {"idx": 1, "over_probability": 0.53, "under_probability": 0.47},
+            {"idx": 0, "over_probability": 0.68, "under_probability": 0.32},
+            {"idx": 1, "over_probability": 0.63, "under_probability": 0.37},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
@@ -323,7 +330,7 @@ class TestCorePick:
         """Games should be sorted by confidence descending."""
         results = [
             {"idx": 0, "over_probability": 0.55, "under_probability": 0.45},  # conf=0.05
-            {"idx": 1, "over_probability": 0.70, "under_probability": 0.30},  # conf=0.20
+            {"idx": 1, "over_probability": 0.75, "under_probability": 0.25},  # conf=0.25
             {"idx": 2, "over_probability": 0.62, "under_probability": 0.38},  # conf=0.12
         ]
         sorted_results = self._apply_recommendation(results)
@@ -334,9 +341,9 @@ class TestCorePick:
     def test_only_one_core_pick(self):
         """Even when multiple games meet core criteria, only 1 is marked."""
         results = [
-            {"idx": 0, "over_probability": 0.70, "under_probability": 0.30},
-            {"idx": 1, "over_probability": 0.68, "under_probability": 0.32},
-            {"idx": 2, "over_probability": 0.65, "under_probability": 0.35},
+            {"idx": 0, "over_probability": 0.75, "under_probability": 0.25},
+            {"idx": 1, "over_probability": 0.72, "under_probability": 0.28},
+            {"idx": 2, "over_probability": 0.70, "under_probability": 0.30},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
@@ -344,15 +351,15 @@ class TestCorePick:
         assert core[0]["idx"] == 0  # highest confidence
 
     def test_under_prob_can_be_core(self):
-        """Under probability >= 0.60 should also qualify for core."""
+        """Under probability >= 0.70 should also qualify for core."""
         results = [
-            {"idx": 0, "over_probability": 0.35, "under_probability": 0.65},
+            {"idx": 0, "over_probability": 0.28, "under_probability": 0.72},
             {"idx": 1, "over_probability": 0.55, "under_probability": 0.45},
         ]
         sorted_results = self._apply_recommendation(results)
         core = [r for r in sorted_results if r["is_core"]]
         assert len(core) == 1
-        assert core[0]["idx"] == 0  # under_prob=0.65 >= 0.60
+        assert core[0]["idx"] == 0  # under_prob=0.72 >= 0.70
 
     def test_confidence_calculation(self):
         """Confidence = abs(prob_over - 0.5)."""
@@ -396,25 +403,31 @@ class TestInjuryModel:
 
 
 class TestMarketModel:
-    """Test market calibration: predicted_total += line_move * 0.35."""
+    """Test market deviation correction: compress when abs diff > 12."""
 
-    def test_line_move_up(self):
+    def test_within_threshold_no_change(self):
         from app.market_model import apply_market_calibration
-        # closing > opening → positive line move
-        result = apply_market_calibration(225.0, 222.0, 226.0)
-        # line_move = 226 - 222 = 4; 225 + 4 * 0.35 = 226.4
-        assert abs(result - 226.4) < 0.01
-
-    def test_line_move_down(self):
-        from app.market_model import apply_market_calibration
-        result = apply_market_calibration(225.0, 228.0, 224.0)
-        # line_move = 224 - 228 = -4; 225 + (-4) * 0.35 = 223.6
-        assert abs(result - 223.6) < 0.01
-
-    def test_no_line_move(self):
-        from app.market_model import apply_market_calibration
-        result = apply_market_calibration(225.0, 225.0, 225.0)
+        # abs(225 - 220) = 5 <= 12 → no change
+        result = apply_market_calibration(225.0, 220.0)
         assert abs(result - 225.0) < 0.01
+
+    def test_above_threshold_compresses(self):
+        from app.market_model import apply_market_calibration
+        # abs(240 - 220) = 20 > 12 → 220 + (240-220)*0.6 = 232.0
+        result = apply_market_calibration(240.0, 220.0)
+        assert abs(result - 232.0) < 0.01
+
+    def test_below_threshold_compresses(self):
+        from app.market_model import apply_market_calibration
+        # abs(205 - 220) = 15 > 12 → 220 + (205-220)*0.6 = 211.0
+        result = apply_market_calibration(205.0, 220.0)
+        assert abs(result - 211.0) < 0.01
+
+    def test_exactly_at_threshold(self):
+        from app.market_model import apply_market_calibration
+        # abs(232 - 220) = 12 → not > 12, no change
+        result = apply_market_calibration(232.0, 220.0)
+        assert abs(result - 232.0) < 0.01
 
 
 class TestTotalModel:
@@ -489,21 +502,23 @@ class TestGamePaceCalculation:
 
 
 class TestPPPCalculation:
-    """PPP uses (off / opp_def) * league_ppp ratio formula."""
+    """PPP uses (off / opp_def) * league_ppp ratio formula with shooting corrections."""
 
     def test_ppp_formula(self):
-        """PPP_home = (home_off / away_def) * 1.12."""
+        """PPP_home = (home_off / away_def) * 1.12, then shooting corrections."""
         from app.ppp_model import calculate_ppp
         h, a = calculate_ppp(112.0, 110.0, 108.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-        assert 1.02 <= h <= 1.18
-        assert 1.02 <= a <= 1.18
+        # After shooting corrections, PPP can slightly exceed 1.18
+        assert h > 1.02
+        assert a > 1.02
 
     def test_ppp_within_normal_range(self):
-        """Realistic ratings produce PPP in [1.02, 1.18]."""
+        """Realistic ratings produce PPP in reasonable range after shooting corrections."""
         from app.ppp_model import calculate_ppp
         for off in [105.0, 110.0, 114.0, 118.0]:
             h, a = calculate_ppp(off, off, 110.0, 110.0, 0.37, 0.37, 0.27, 0.27)
-            assert 1.02 <= h <= 1.18
+            # Base PPP clamped to [1.02, 1.18], then * FT factor ≈ 1.0135
+            assert 1.02 <= h <= 1.25
 
     def test_predicted_total_in_range(self):
         """With realistic PPP and pace, predicted total stays in a reasonable range."""
@@ -578,32 +593,30 @@ class TestSimulationConstants:
 
 
 class TestMarketCalibration:
-    """Test Market Model: predicted_total += line_move * 0.35."""
+    """Test Market Deviation Correction: compress when abs(diff) > 12."""
 
-    def test_positive_line_move(self):
-        """Line moves up → predicted total increases."""
+    def test_small_deviation_no_change(self):
+        """When deviation <= 12, model total is unchanged."""
         from app.market_model import apply_market_calibration
-        result = apply_market_calibration(225.0, 222.0, 226.0)
-        # line_move = 226 - 222 = 4; 225 + 4 * 0.35 = 226.4
-        assert abs(result - 226.4) < 0.01
+        result = apply_market_calibration(230.0, 225.0)
+        assert abs(result - 230.0) < 0.01
 
-    def test_negative_line_move(self):
-        """Line moves down → predicted total decreases."""
+    def test_large_positive_deviation(self):
+        """When model_total - closing > 12, compress toward closing."""
         from app.market_model import apply_market_calibration
-        result = apply_market_calibration(225.0, 228.0, 224.0)
-        # line_move = 224 - 228 = -4; 225 + (-4) * 0.35 = 223.6
-        assert abs(result - 223.6) < 0.01
+        # abs(240 - 225) = 15 > 12 → 225 + (240-225)*0.6 = 234.0
+        result = apply_market_calibration(240.0, 225.0)
+        assert abs(result - 234.0) < 0.01
 
-    def test_no_line_move(self):
-        """When opening == closing, no adjustment."""
+    def test_large_negative_deviation(self):
+        """When closing - model_total > 12, compress toward closing."""
         from app.market_model import apply_market_calibration
-        result = apply_market_calibration(225.0, 225.0, 225.0)
+        # abs(210 - 225) = 15 > 12 → 225 + (210-225)*0.6 = 216.0
+        result = apply_market_calibration(210.0, 225.0)
+        assert abs(result - 216.0) < 0.01
+
+    def test_equal_totals(self):
+        """When model == closing, no adjustment."""
+        from app.market_model import apply_market_calibration
+        result = apply_market_calibration(225.0, 225.0)
         assert abs(result - 225.0) < 0.01
-
-    def test_calibration_direction(self):
-        """Line moving up should pull prediction up."""
-        from app.market_model import apply_market_calibration
-        base = 225.0
-        up = apply_market_calibration(base, 220.0, 228.0)
-        down = apply_market_calibration(base, 228.0, 220.0)
-        assert up > base > down

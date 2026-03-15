@@ -5,6 +5,8 @@ ratings with shooting structure corrections.
 """
 from __future__ import annotations
 
+LEAGUE_3P_RATE = 0.37
+
 
 def calculate_ppp(
     home_off_rating: float,
@@ -19,8 +21,8 @@ def calculate_ppp(
     """Calculate Points Per Possession for both teams.
 
     PPP combines a team's offensive rating with the opponent's defensive
-    rating and applies shooting structure corrections for three-point and
-    free-throw rates.
+    rating, clamps to a safe range, then applies shooting structure
+    corrections for three-point and free-throw rates.
 
     Parameters
     ----------
@@ -45,5 +47,12 @@ def calculate_ppp(
 
     ppp_home = max(1.02, min(ppp_home, 1.18))
     ppp_away = max(1.02, min(ppp_away, 1.18))
+
+    # Shooting structure corrections
+    ppp_home *= 1 + (home_3p_rate - LEAGUE_3P_RATE) * 0.20
+    ppp_away *= 1 + (away_3p_rate - LEAGUE_3P_RATE) * 0.20
+
+    ppp_home *= 1 + home_ft_rate * 0.05
+    ppp_away *= 1 + away_ft_rate * 0.05
 
     return ppp_home, ppp_away

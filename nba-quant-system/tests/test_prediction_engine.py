@@ -562,6 +562,14 @@ class TestSimulationEngine:
         expected_std = 10 + abs(pace_diff) * 0.6 + abs(ppp_home - ppp_away) * 4
         assert abs(expected_std - 13.28) < 0.01
 
+        # Verify the simulation produces results consistent with this std:
+        # larger pace_diff → wider distribution → probabilities closer to 0.5
+        from app.simulation_engine import run_total_simulation
+        narrow = run_total_simulation(1, 225.0, 220.0, 0.0, 1.12, 1.12, n_sim=50000)
+        wide = run_total_simulation(1, 225.0, 220.0, 10.0, 1.20, 1.02, n_sim=50000)
+        # Wider std should push over_prob closer to 0.5
+        assert abs(wide["over_probability"] - 0.5) < abs(narrow["over_probability"] - 0.5)
+
 
 class TestSimulationConstants:
     """Verify simulation engine defaults."""

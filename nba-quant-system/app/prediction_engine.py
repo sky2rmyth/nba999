@@ -365,10 +365,7 @@ def run_prediction(target_date: str | None = None) -> None:
         over_probability = max(0.05, min(0.95, over_probability))
         under_probability = 1.0 - over_probability
 
-        print("Diff:", round(diff, 2))
-        print("Over Probability:", round(over_probability, 4))
-        print("Under Probability:", round(under_probability, 4))
-        print("=========================")
+        logger.info("Diff: %.2f  Over Prob: %.4f  Under Prob: %.4f", diff, over_probability, under_probability)
 
         progress.set_game_progress(
             f"⚙️ Game {idx + 1}/{len(games)}: {zh_name(vis['full_name'])} vs {zh_name(home['full_name'])} ✅"

@@ -446,6 +446,56 @@ class TestTotalModel:
         result = calculate_predicted_total(105.0, 1.15, 1.12, closing_total=235.0)
         assert result > 230
 
+    def test_no_suppression_when_one_ppp_low(self):
+        """No suppression when only one team has PPP > 1.14."""
+        from app.total_model import calculate_predicted_total
+        # home PPP high, away PPP low → no flag
+        result = calculate_predicted_total(100.0, 1.16, 1.10, closing_total=225.0)
+        model_total = 100.0 * (1.16 + 1.10)
+        expected = model_total * 0.65 + 225.0 * 0.35
+        assert abs(result - expected) < 0.01
+
+    def test_dual_high_ppp_suppression(self):
+        """Both PPP > 1.14 triggers pace and total suppression."""
+        from app.total_model import calculate_predicted_total
+        pace, h, a, line = 100.0, 1.16, 1.16, 225.0
+        result = calculate_predicted_total(pace, h, a, closing_total=line)
+        # Expected: pace * 0.97 = 97, model = 97 * 2.32 = 225.04,
+        # model *= 0.90 = 202.536, predicted = 202.536 * 0.65 + 225 * 0.35
+        adj_pace = pace * 0.97
+        model = adj_pace * (h + a) * 0.90
+        expected = model * 0.65 + line * 0.35
+        assert abs(result - expected) < 0.01
+
+    def test_extreme_deviation_cap(self):
+        """Predicted total capped when deviation > 15."""
+        from app.total_model import calculate_predicted_total
+        # Use very high pace + PPP with low closing total to force gap > 15
+        result = calculate_predicted_total(110.0, 1.13, 1.13, closing_total=200.0)
+        # model = 110 * 2.26 = 248.6, predicted = 248.6*0.65+200*0.35 = 231.59
+        # 231.59 - 200 = 31.59 > 15 → capped at 200 + 12 = 212
+        assert abs(result - 212.0) < 0.01
+
+    def test_extreme_deviation_not_triggered(self):
+        """No cap when deviation <= 15."""
+        from app.total_model import calculate_predicted_total
+        result = calculate_predicted_total(99.0, 1.12, 1.10, closing_total=220.0)
+        # model = 99 * 2.22 = 219.78, predicted = 219.78*0.65+220*0.35 ≈ 219.86
+        # 219.86 - 220 = -0.14 → no cap
+        model_total = 99.0 * (1.12 + 1.10)
+        expected = model_total * 0.65 + 220.0 * 0.35
+        assert abs(result - expected) < 0.01
+
+    def test_dual_high_ppp_with_extreme_cap(self):
+        """Dual high PPP + extreme deviation both apply."""
+        from app.total_model import calculate_predicted_total
+        # Both PPP > 1.14, high pace, low closing → triggers both
+        result = calculate_predicted_total(110.0, 1.18, 1.18, closing_total=200.0)
+        # pace*0.97=106.7, model=106.7*2.36=251.812, *0.90=226.63
+        # predicted=226.63*0.65+200*0.35=147.31+70=217.31
+        # 217.31-200=17.31>15 → capped at 212
+        assert abs(result - 212.0) < 0.01
+
 
 class TestLeagueConstants:
     """Test league-average constants in game_simulator (unchanged for training)."""

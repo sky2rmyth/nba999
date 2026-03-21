@@ -373,7 +373,9 @@ def run_prediction(target_date: str | None = None) -> None:
 
         # --- Module 7: Probability Calculation ---
         over_probability = sim["over_probability"]
-        under_probability = sim["under_probability"]
+        # Compress probabilities toward 0.5 to prevent inflated signals
+        over_probability = 0.5 + (over_probability - 0.5) * 0.75
+        under_probability = 1.0 - over_probability
 
         print("Over Probability:", round(over_probability, 4))
         print("Under Probability:", round(under_probability, 4))

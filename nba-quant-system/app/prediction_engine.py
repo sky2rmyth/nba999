@@ -22,7 +22,6 @@ from .pace_model import calculate_game_pace as pace_model_calc
 from .ppp_model import calculate_ppp as ppp_model_calc
 from .prediction_models import MODEL_DIR, MODEL_FILES
 from .retrain_engine import ensure_models
-from .simulation_engine import run_total_simulation
 from .team_translation import zh_name
 from .telegram_bot import send_message, ProgressTracker
 from .total_model import calculate_predicted_total
@@ -360,42 +359,24 @@ def run_prediction(target_date: str | None = None) -> None:
         logger.info("Game Pace: %.2f  Home PPP: %.4f  Away PPP: %.4f", game_pace, home_ppp, away_ppp)
         logger.info("Predicted Total: %.2f  Closing Line: %.1f", predicted_total, live_total)
 
-        # --- Module 6: Monte Carlo Simulation ---
-        sim = run_total_simulation(
-            game_id=game_id,
-            predicted_total=predicted_total,
-            closing_total=live_total,
-            pace_diff=pace_diff,
-            ppp_home=home_ppp,
-            ppp_away=away_ppp,
-            n_sim=MIN_SIMULATION_COUNT,
-        )
-
-        # --- Module 7: Probability Calculation ---
-        over_probability = sim["over_probability"]
-        # Compress probabilities toward 0.5 to prevent inflated signals
-        over_probability = 0.5 + (over_probability - 0.5) * 0.75
+        # --- Module 6: Formula-based probability (replaces Monte Carlo) ---
+        diff = predicted_total - live_total
+        over_probability = 0.5 + diff / 20.0
+        over_probability = max(0.05, min(0.95, over_probability))
         under_probability = 1.0 - over_probability
 
-        print("Over Probability:", round(over_probability, 4))
-        print("Under Probability:", round(under_probability, 4))
-        print("=========================")
+        logger.info("Diff: %.2f  Over Prob: %.4f  Under Prob: %.4f", diff, over_probability, under_probability)
 
         progress.set_game_progress(
             f"⚙️ Game {idx + 1}/{len(games)}: {zh_name(vis['full_name'])} vs {zh_name(home['full_name'])} ✅"
         )
 
-        # --- Verify simulation count ---
-        sim_count = sim.get("simulation_count", 0)
-        if sim_count < MIN_SIMULATION_COUNT:
-            logger.error("Simulation count %d < %d for game %s — aborting", sim_count, MIN_SIMULATION_COUNT, game_id)
-            sys.exit(1)
-        logger.info("Simulation runs: %d (game_id=%s)", sim_count, game_id)
-
-        # --- Module 8: Model Judgment ---
-        if over_probability >= 0.60:
+        # --- Module 7: Model Judgment (with diff filter) ---
+        if abs(diff) < 4:
+            total_pick = "PASS"
+        elif over_probability >= 0.60 and diff >= 4:
             total_pick = "大分"
-        elif under_probability >= 0.60:
+        elif under_probability >= 0.60 and diff <= -4:
             total_pick = "小分"
         else:
             total_pick = "PASS"
@@ -423,8 +404,9 @@ def run_prediction(target_date: str | None = None) -> None:
         save_simulation_log({
             "game_id": game_id,
             "model_version": model_bundle.version,
-            "simulation_runs": sim_count,
-            **sim,
+            "simulation_runs": 0,
+            "over_probability": over_probability,
+            "under_probability": under_probability,
         })
 
         # --- Collect game result for core pick selection ---
@@ -466,9 +448,13 @@ def run_prediction(target_date: str | None = None) -> None:
     for gr in sorted_results:
         prob_over = gr["over_probability"]
         prob_under = gr["under_probability"]
-        if prob_over >= 0.60:
+        game_diff = gr["predicted_total"] - gr["live_total"]
+
+        if abs(game_diff) < 4:
+            prediction = "PASS"
+        elif prob_over >= 0.60 and game_diff >= 4:
             prediction = "大分"
-        elif prob_under >= 0.60:
+        elif prob_under >= 0.60 and game_diff <= -4:
             prediction = "小分"
         else:
             prediction = "PASS"

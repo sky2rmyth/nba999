@@ -431,14 +431,15 @@ class TestMarketModel:
 
 
 class TestTotalModel:
-    """Test total calculation: model_total * 0.65 + closing_total * 0.35."""
+    """Test total calculation: closing_total + (raw_total - closing_total) * 0.35."""
 
     def test_basic_total(self):
         from app.total_model import calculate_predicted_total
-        # model_total = 99 * (1.12 + 1.10) = 219.78
-        # predicted = 219.78 * 0.65 + 220.0 * 0.35 = 142.857 + 77.0 = 219.857
+        # raw_total = 99 * (1.12 + 1.10) = 219.78
+        # model_total = 220.0 + (219.78 - 220.0) * 0.35 = 220.0 + (-0.22)*0.35 = 219.923
         result = calculate_predicted_total(99.0, 1.12, 1.10, closing_total=220.0)
-        expected = 219.78 * 0.65 + 220.0 * 0.35
+        raw = 99.0 * (1.12 + 1.10)
+        expected = 220.0 + (raw - 220.0) * 0.35
         assert abs(result - expected) < 0.01
 
     def test_high_pace(self):
@@ -446,62 +447,57 @@ class TestTotalModel:
         result = calculate_predicted_total(105.0, 1.15, 1.12, closing_total=235.0)
         assert result > 230
 
-    def test_no_suppression_when_one_ppp_low(self):
-        """No suppression when only one team has PPP > 1.14."""
+    def test_no_cooling_when_one_ppp_low(self):
+        """No cooling when only one team has PPP > 1.17."""
         from app.total_model import calculate_predicted_total
-        # home PPP high, away PPP low → no flag
-        result = calculate_predicted_total(100.0, 1.16, 1.10, closing_total=225.0)
-        model_total = 100.0 * (1.16 + 1.10)
-        expected = model_total * 0.65 + 225.0 * 0.35
+        # home PPP high, away PPP low → no cooling
+        result = calculate_predicted_total(100.0, 1.18, 1.10, closing_total=225.0)
+        raw = 100.0 * (1.18 + 1.10)
+        expected = 225.0 + (raw - 225.0) * 0.35
         assert abs(result - expected) < 0.01
 
-    def test_dual_high_ppp_slow_pace_suppression(self):
-        """Both PPP > 1.14 with slow pace (< 104) suppresses total."""
+    def test_dual_high_ppp_cooling(self):
+        """Both PPP > 1.17 applies 0.97 cooling."""
         from app.total_model import calculate_predicted_total
-        pace, h, a, line = 100.0, 1.16, 1.16, 225.0
+        pace, h, a, line = 100.0, 1.18, 1.18, 225.0
         result = calculate_predicted_total(pace, h, a, closing_total=line)
-        # model = 100 * 2.32 = 232.0, * 0.95 = 220.4
-        # predicted = 220.4 * 0.65 + 225 * 0.35 = 143.26 + 78.75 = 222.01
-        model = pace * (h + a) * 0.95
-        expected = model * 0.65 + line * 0.35
+        raw = pace * (h + a)
+        model = line + (raw - line) * 0.35
+        # edge = model - line; check if < 12 (should be)
+        expected = model * 0.97
         assert abs(result - expected) < 0.01
 
-    def test_extreme_deviation_cap(self):
-        """Predicted total compressed when abs(deviation) > 15."""
+    def test_hard_cap_positive(self):
+        """Edge capped at +12 when deviation is too large."""
         from app.total_model import calculate_predicted_total
-        # Use very high pace + PPP with low closing total to force gap > 15
+        # Use very high pace + PPP with low closing total to force gap > 12
         result = calculate_predicted_total(110.0, 1.13, 1.13, closing_total=200.0)
-        # model = 110 * 2.26 = 248.6, predicted = 248.6*0.65+200*0.35 = 231.59
-        # edge = 231.59 - 200 = 31.59 > 15 → 200 + 31.59 * 0.6 = 218.954
-        model = 110.0 * (1.13 + 1.13)
-        raw_predicted = model * 0.65 + 200.0 * 0.35
-        edge = raw_predicted - 200.0
-        expected = 200.0 + edge * 0.6
-        assert abs(result - expected) < 0.01
+        # raw = 110 * 2.26 = 248.6
+        # model = 200 + (248.6 - 200) * 0.35 = 200 + 17.01 = 217.01
+        # edge = 17.01 > 12 → model = 200 + 12 = 212
+        assert abs(result - 212.0) < 0.01
 
-    def test_extreme_deviation_not_triggered(self):
-        """No cap when deviation <= 15."""
+    def test_no_cap_when_within_range(self):
+        """No cap when deviation <= 12."""
         from app.total_model import calculate_predicted_total
         result = calculate_predicted_total(99.0, 1.12, 1.10, closing_total=220.0)
-        # model = 99 * 2.22 = 219.78, predicted = 219.78*0.65+220*0.35 ≈ 219.86
-        # 219.86 - 220 = -0.14 → no cap
-        model_total = 99.0 * (1.12 + 1.10)
-        expected = model_total * 0.65 + 220.0 * 0.35
+        # raw = 99 * 2.22 = 219.78
+        # model = 220 + (219.78 - 220) * 0.35 = 220 - 0.077 = 219.923
+        # edge = -0.077 → no cap
+        raw = 99.0 * (1.12 + 1.10)
+        expected = 220.0 + (raw - 220.0) * 0.35
         assert abs(result - expected) < 0.01
 
-    def test_dual_high_ppp_with_extreme_cap(self):
-        """Dual high PPP + extreme deviation both apply."""
+    def test_dual_high_ppp_with_cap(self):
+        """Dual high PPP cooling + hard cap both apply."""
         from app.total_model import calculate_predicted_total
-        # Both PPP > 1.14, high pace (110 >= 104) → boost *1.03, low closing → triggers both
+        # Both PPP > 1.17, high pace, low closing → triggers cap then cooling
         result = calculate_predicted_total(110.0, 1.18, 1.18, closing_total=200.0)
-        # model = 110 * 2.36 = 259.6, * 1.03 = 267.388
-        # predicted = 267.388 * 0.65 + 200 * 0.35 = 173.8022 + 70 = 243.8022
-        # edge = 243.8022 - 200 = 43.8022 > 15 → 200 + 43.8022 * 0.6 = 226.281
-        model = 110.0 * (1.18 + 1.18) * 1.03
-        raw_predicted = model * 0.65 + 200.0 * 0.35
-        edge = raw_predicted - 200.0
-        expected = 200.0 + edge * 0.6
-        assert abs(result - expected) < 0.01
+        # raw = 110 * 2.36 = 259.6
+        # model = 200 + (259.6 - 200) * 0.35 = 200 + 20.86 = 220.86
+        # edge = 20.86 > 12 → model = 200 + 12 = 212
+        # both PPP > 1.17 → 212 * 0.97 = 205.64
+        assert abs(result - 205.64) < 0.01
 
 
 class TestLeagueConstants:

@@ -1,18 +1,16 @@
 """Total calculation model for NBA totals prediction.
 
 Combines game pace and PPP to produce the predicted total.
-Uses PPP–Pace linkage: when both teams have high PPP, the pace
-determines whether the model allows a higher total (fast pace)
-or suppresses it (slow pace).
+Uses market-line anchoring: the model total is allowed to deviate
+from the closing total by only a limited fraction (0.35), with a
+hard cap of ±12 points and high-PPP cooling.
 """
 from __future__ import annotations
 
-HIGH_PPP_THRESHOLD = 1.14
-FAST_PACE_THRESHOLD = 104
-FAST_PACE_BOOST = 1.03
-SLOW_PACE_SUPPRESS = 0.95
-EXTREME_DEV_LIMIT = 15
-EXTREME_DEV_COMPRESS = 0.6
+HIGH_PPP_THRESHOLD = 1.17
+MAX_EDGE = 12
+ANCHOR_WEIGHT = 0.35
+HIGH_PPP_COOL = 0.97
 
 
 def calculate_predicted_total(
@@ -23,9 +21,10 @@ def calculate_predicted_total(
 ) -> float:
     """Calculate the predicted total from pace and PPP with market anchor.
 
-    When both teams have PPP above :data:`HIGH_PPP_THRESHOLD`, the game
-    pace determines the adjustment: fast pace (≥ 104) boosts the total
-    while slow pace suppresses it, linking offensive efficiency to tempo.
+    The raw total (pace × combined PPP) is anchored to the closing line:
+    only 35 % of the deviation is kept.  A hard cap of ±12 prevents
+    extreme outliers, and dual-high-PPP games receive a 3 % cooling
+    factor to counteract systematic over-prediction.
 
     Parameters
     ----------
@@ -43,23 +42,21 @@ def calculate_predicted_total(
     float
         Predicted total score.
     """
-    # --- Dual high PPP detection ---
-    high_offense = ppp_home > HIGH_PPP_THRESHOLD and ppp_away > HIGH_PPP_THRESHOLD
+    # --- Step 1: Raw total ---
+    raw_total = game_pace * (ppp_home + ppp_away)
 
-    model_total = game_pace * (ppp_home + ppp_away)
+    # --- Step 2: Market-line anchoring (only 35% deviation allowed) ---
+    model_total = closing_total + (raw_total - closing_total) * ANCHOR_WEIGHT
 
-    # --- PPP–Pace linkage ---
-    if high_offense:
-        if game_pace >= FAST_PACE_THRESHOLD:
-            model_total = model_total * FAST_PACE_BOOST
-        else:
-            model_total = model_total * SLOW_PACE_SUPPRESS
+    # --- Step 3: Hard cap at ±12 ---
+    edge = model_total - closing_total
+    if edge > MAX_EDGE:
+        model_total = closing_total + MAX_EDGE
+    elif edge < -MAX_EDGE:
+        model_total = closing_total - MAX_EDGE
 
-    predicted_total = model_total * 0.65 + closing_total * 0.35
+    # --- Step 4: High-PPP cooling (prevent all-over bias) ---
+    if ppp_home > HIGH_PPP_THRESHOLD and ppp_away > HIGH_PPP_THRESHOLD:
+        model_total *= HIGH_PPP_COOL
 
-    # --- Extreme deviation protection ---
-    edge = predicted_total - closing_total
-    if abs(edge) > EXTREME_DEV_LIMIT:
-        predicted_total = closing_total + edge * EXTREME_DEV_COMPRESS
-
-    return predicted_total
+    return model_total

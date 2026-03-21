@@ -460,8 +460,8 @@ class TestTotalModel:
         from app.total_model import calculate_predicted_total
         pace, h, a, line = 100.0, 1.16, 1.16, 225.0
         result = calculate_predicted_total(pace, h, a, closing_total=line)
-        # Expected: pace * 0.97 = 97, model = 97 * 2.32 = 225.04,
-        # model *= 0.90 = 202.536, predicted = 202.536 * 0.65 + 225 * 0.35
+        # Expected: pace * 0.97 = 97, model = 97 * 2.32 = 224.96,
+        # model *= 0.90 = 202.464, predicted = 202.464 * 0.65 + 225 * 0.35
         adj_pace = pace * 0.97
         model = adj_pace * (h + a) * 0.90
         expected = model * 0.65 + line * 0.35
@@ -491,9 +491,9 @@ class TestTotalModel:
         from app.total_model import calculate_predicted_total
         # Both PPP > 1.14, high pace, low closing → triggers both
         result = calculate_predicted_total(110.0, 1.18, 1.18, closing_total=200.0)
-        # pace*0.97=106.7, model=106.7*2.36=251.812, *0.90=226.63
-        # predicted=226.63*0.65+200*0.35=147.31+70=217.31
-        # 217.31-200=17.31>15 → capped at 212
+        # pace*0.97=106.7, model=106.7*2.36=251.812, *0.90=226.631
+        # predicted=226.631*0.65+200*0.35=147.31+70=217.31
+        # 217.31-200=17.31 > 15 → capped at 212
         assert abs(result - 212.0) < 0.01
 
 

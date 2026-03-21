@@ -2,7 +2,7 @@
 
 Combines game pace and PPP to produce the predicted total.
 Includes dual-high-PPP suppression to prevent runaway "over" predictions
-when both teams have strong offences.
+when both teams have strong offenses.
 """
 from __future__ import annotations
 

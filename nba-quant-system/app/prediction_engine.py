@@ -30,11 +30,32 @@ logger = logging.getLogger(__name__)
 
 MIN_SIMULATION_COUNT = 10000
 
+MIN_DIFF_THRESHOLD = 2.5
+MIN_PROB_THRESHOLD = 0.58
+
 ICON_CORE = "⭐"
 ICON_RECOMMEND = "✅"
 ICON_NO = "❌"
 ICON_OVER = "🟢"
 ICON_UNDER = "🔵"
+
+
+def _determine_total_pick(diff: float, over_prob: float, under_prob: float) -> str:
+    """Return the model judgment for a single game.
+
+    Rules (applied in order):
+    1. ``abs(diff) < MIN_DIFF_THRESHOLD`` → PASS
+    2. ``max(over_prob, under_prob) < MIN_PROB_THRESHOLD`` → PASS
+    3. ``diff > 0`` → 大分 (over)
+    4. otherwise → 小分 (under)
+    """
+    if abs(diff) < MIN_DIFF_THRESHOLD:
+        return "PASS"
+    if max(over_prob, under_prob) < MIN_PROB_THRESHOLD:
+        return "PASS"
+    if diff > 0:
+        return "大分"
+    return "小分"
 
 
 def build_pick_icon(is_core, is_recommend, direction):
@@ -372,14 +393,7 @@ def run_prediction(target_date: str | None = None) -> None:
         )
 
         # --- Module 7: Model Judgment (with diff filter) ---
-        if abs(diff) < 2.5:
-            total_pick = "PASS"
-        elif max(over_probability, under_probability) < 0.58:
-            total_pick = "PASS"
-        elif diff > 0:
-            total_pick = "大分"
-        else:
-            total_pick = "小分"
+        total_pick = _determine_total_pick(diff, over_probability, under_probability)
 
         # --- Save prediction to database ---
         prediction_row = {
@@ -450,14 +464,7 @@ def run_prediction(target_date: str | None = None) -> None:
         prob_under = gr["under_probability"]
         game_diff = gr["predicted_total"] - gr["live_total"]
 
-        if abs(game_diff) < 2.5:
-            prediction = "PASS"
-        elif max(prob_over, prob_under) < 0.58:
-            prediction = "PASS"
-        elif game_diff > 0:
-            prediction = "大分"
-        else:
-            prediction = "小分"
+        prediction = _determine_total_pick(game_diff, prob_over, prob_under)
 
         predictions.append({
             "away": zh_name(gr["vis"]["full_name"]),

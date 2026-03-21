@@ -361,7 +361,7 @@ def run_prediction(target_date: str | None = None) -> None:
 
         # --- Module 6: Formula-based probability (replaces Monte Carlo) ---
         diff = predicted_total - live_total
-        over_probability = 0.5 + diff / 20.0
+        over_probability = 0.5 + diff / 18.0
         over_probability = max(0.05, min(0.95, over_probability))
         under_probability = 1.0 - over_probability
 
@@ -372,14 +372,14 @@ def run_prediction(target_date: str | None = None) -> None:
         )
 
         # --- Module 7: Model Judgment (with diff filter) ---
-        if abs(diff) < 4:
+        if abs(diff) < 2.5:
             total_pick = "PASS"
-        elif over_probability >= 0.60 and diff >= 4:
+        elif max(over_probability, under_probability) < 0.58:
+            total_pick = "PASS"
+        elif diff > 0:
             total_pick = "大分"
-        elif under_probability >= 0.60 and diff <= -4:
-            total_pick = "小分"
         else:
-            total_pick = "PASS"
+            total_pick = "小分"
 
         # --- Save prediction to database ---
         prediction_row = {
@@ -450,14 +450,14 @@ def run_prediction(target_date: str | None = None) -> None:
         prob_under = gr["under_probability"]
         game_diff = gr["predicted_total"] - gr["live_total"]
 
-        if abs(game_diff) < 4:
+        if abs(game_diff) < 2.5:
             prediction = "PASS"
-        elif prob_over >= 0.60 and game_diff >= 4:
+        elif max(prob_over, prob_under) < 0.58:
+            prediction = "PASS"
+        elif game_diff > 0:
             prediction = "大分"
-        elif prob_under >= 0.60 and game_diff <= -4:
-            prediction = "小分"
         else:
-            prediction = "PASS"
+            prediction = "小分"
 
         predictions.append({
             "away": zh_name(gr["vis"]["full_name"]),

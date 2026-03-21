@@ -2,14 +2,14 @@
 
 Combines game pace and PPP to produce the predicted total.
 Uses market-line anchoring: the model total is allowed to deviate
-from the closing total by only a limited fraction (0.35), with a
-hard cap of ±12 points and high-PPP cooling.
+from the closing total by only a limited fraction (0.65), with a
+hard cap of ±15 points and high-PPP cooling.
 """
 from __future__ import annotations
 
 HIGH_PPP_THRESHOLD = 1.17
-MAX_EDGE = 12
-ANCHOR_WEIGHT = 0.35
+MAX_EDGE = 15
+ANCHOR_WEIGHT = 0.65
 HIGH_PPP_COOL = 0.97
 
 
@@ -22,7 +22,7 @@ def calculate_predicted_total(
     """Calculate the predicted total from pace and PPP with market anchor.
 
     The raw total (pace × combined PPP) is anchored to the closing line:
-    only 35 % of the deviation is kept.  A hard cap of ±12 prevents
+    only 65 % of the deviation is kept.  A hard cap of ±15 prevents
     extreme outliers, and dual-high-PPP games receive a 3 % cooling
     factor to counteract systematic over-prediction.
 
@@ -45,10 +45,10 @@ def calculate_predicted_total(
     # --- Step 1: Raw total ---
     raw_total = game_pace * (ppp_home + ppp_away)
 
-    # --- Step 2: Market-line anchoring (only 35% deviation allowed) ---
+    # --- Step 2: Market-line anchoring (65% deviation allowed) ---
     model_total = closing_total + (raw_total - closing_total) * ANCHOR_WEIGHT
 
-    # --- Step 3: Hard cap at ±12 ---
+    # --- Step 3: Hard cap at ±15 ---
     edge = model_total - closing_total
     if edge > MAX_EDGE:
         model_total = closing_total + MAX_EDGE
